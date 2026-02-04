@@ -642,7 +642,9 @@ class CMLClient:
     # ==========================================================================
     def _get_router1_baseline(self) -> str:
         """Get baseline interface configuration commands for Router-1."""
-        return """default interface GigabitEthernet2
+        return """hostname Router-1
+!
+default interface GigabitEthernet2
 default interface GigabitEthernet3
 default interface GigabitEthernet4
 !
@@ -673,7 +675,9 @@ end"""
 
     def _get_router2_baseline(self) -> str:
         """Get baseline interface configuration commands for Router-2."""
-        return """default interface GigabitEthernet2
+        return """hostname Router-2
+!
+default interface GigabitEthernet2
 default interface GigabitEthernet3
 default interface GigabitEthernet4
 !
@@ -704,7 +708,9 @@ end"""
 
     def _get_router3_baseline(self) -> str:
         """Get baseline interface configuration commands for Router-3."""
-        return """default interface GigabitEthernet2
+        return """hostname Router-3
+!
+default interface GigabitEthernet2
 default interface GigabitEthernet3
 default interface GigabitEthernet4
 !
@@ -735,7 +741,9 @@ end"""
 
     def _get_router4_baseline(self) -> str:
         """Get baseline interface configuration commands for Router-4."""
-        return """default interface GigabitEthernet2
+        return """hostname Router-4
+!
+default interface GigabitEthernet2
 default interface GigabitEthernet3
 default interface GigabitEthernet4
 !
