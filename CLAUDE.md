@@ -1,0 +1,1 @@
+- deploy only on dcloud environment root@198.18.134.22

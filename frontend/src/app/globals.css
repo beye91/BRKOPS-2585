@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0A0E14;
+  --background-elevated: #1C2433;
+  --primary: #049FD9;
+  --success: #00D084;
+  --warning: #FFC043;
+  --error: #FF4757;
+  --text-primary: #E6E8EB;
+  --text-secondary: #8B95A5;
+  --border: #2A3544;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--text-primary);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Code blocks */
+pre, code {
+  font-family: var(--font-mono), 'JetBrains Mono', monospace;
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(28, 36, 51, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+}
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 0 20px rgba(4, 159, 217, 0.3);
+}
+
+.glow-success {
+  box-shadow: 0 0 20px rgba(0, 208, 132, 0.3);
+}
+
+.glow-error {
+  box-shadow: 0 0 20px rgba(255, 71, 87, 0.3);
+}
+
+/* Pipeline stage animations */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+.pulse-ring {
+  animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Voice waveform */
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.waveform-bar {
+  width: 3px;
+  background: var(--primary);
+  border-radius: 2px;
+  animation: waveform 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes waveform {
+  0% { height: 5px; }
+  100% { height: 20px; }
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: all 0.2s ease;
+}
+
+.card-hover:hover {
+  background-color: var(--background-elevated);
+  border-color: var(--primary);
+  transform: translateY(-2px);
+}
+
+/* Topology node styles */
+.topology-node {
+  transition: all 0.2s ease;
+}
+
+.topology-node:hover {
+  filter: brightness(1.2);
+}
+
+.topology-node.affected {
+  animation: glow 1s ease-in-out infinite alternate;
+}
+
+@keyframes glow {
+  0% { filter: drop-shadow(0 0 5px var(--primary)); }
+  100% { filter: drop-shadow(0 0 15px var(--primary)); }
+}
