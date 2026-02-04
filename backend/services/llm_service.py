@@ -18,12 +18,15 @@ class LLMService:
     """
     LLM service with primary (OpenAI GPT-4) and fallback (Claude) providers.
     Automatically falls back to secondary provider on failure.
+    Supports demo_mode for mock responses without real API calls.
     """
 
-    def __init__(self):
+    def __init__(self, demo_mode: bool = False):
+        self.demo_mode = demo_mode
         self.openai_client = None
         self.anthropic_client = None
-        self._init_clients()
+        if not demo_mode:
+            self._init_clients()
 
     def _init_clients(self):
         """Initialize LLM clients based on available API keys."""
@@ -155,6 +158,11 @@ class LLMService:
         Returns:
             Parsed intent as dictionary
         """
+        # Demo mode: return realistic mock intent
+        if self.demo_mode:
+            logger.info("Demo mode: returning mock intent")
+            return self._generate_demo_intent(transcript)
+
         prompt = intent_prompt.replace("{{input_text}}", transcript)
 
         system_prompt = """You are a network operations intent parser.
@@ -177,6 +185,71 @@ class LLMService:
                 return json.loads(json_match.group())
             raise ValueError(f"Failed to parse JSON from response: {response}")
 
+    def _generate_demo_intent(self, transcript: str) -> Dict[str, Any]:
+        """Generate realistic demo intent based on transcript."""
+        transcript_lower = transcript.lower()
+
+        if "ospf" in transcript_lower and "area" in transcript_lower:
+            # Extract router and area from transcript
+            router = "Router-1"
+            area = "10"
+            if "router-2" in transcript_lower:
+                router = "Router-2"
+            if "router-3" in transcript_lower:
+                router = "Router-3"
+            if "router-4" in transcript_lower:
+                router = "Router-4"
+
+            import re
+            area_match = re.search(r'area\s*(\d+)', transcript_lower)
+            if area_match:
+                area = area_match.group(1)
+
+            return {
+                "action": "modify_ospf_area",
+                "target_devices": [router],
+                "parameters": {
+                    "ospf_process_id": 1,
+                    "new_area": int(area),
+                    "interfaces": ["GigabitEthernet2", "GigabitEthernet3", "GigabitEthernet4"]
+                },
+                "confidence": 95,
+                "reasoning": f"User wants to change OSPF configuration on {router} to use area {area}"
+            }
+
+        elif "credential" in transcript_lower or "password" in transcript_lower:
+            return {
+                "action": "rotate_credentials",
+                "target_devices": ["Router-1", "Router-2", "Router-3", "Router-4"],
+                "parameters": {
+                    "credential_type": "enable_secret",
+                    "scope": "datacenter"
+                },
+                "confidence": 90,
+                "reasoning": "User wants to rotate credentials across datacenter devices"
+            }
+
+        elif "security" in transcript_lower or "cve" in transcript_lower:
+            return {
+                "action": "apply_security_patch",
+                "target_devices": ["Router-1", "Router-2"],
+                "parameters": {
+                    "cve_id": "CVE-2024-1234",
+                    "patch_type": "access_list"
+                },
+                "confidence": 88,
+                "reasoning": "User wants to apply security remediation for CVE"
+            }
+
+        else:
+            return {
+                "action": "generic_config_change",
+                "target_devices": ["Router-1"],
+                "parameters": {},
+                "confidence": 70,
+                "reasoning": "Generic configuration change request"
+            }
+
     async def generate_config(
         self,
         intent: Dict[str, Any],
@@ -194,6 +267,11 @@ class LLMService:
         Returns:
             Generated configuration as dictionary
         """
+        # Demo mode: return realistic mock config
+        if self.demo_mode:
+            logger.info("Demo mode: returning mock config")
+            return self._generate_demo_config(intent)
+
         prompt = config_prompt.replace("{{intent}}", json.dumps(intent, indent=2))
         if current_config:
             prompt = prompt.replace("{{current_config}}", current_config)
@@ -219,6 +297,87 @@ class LLMService:
                 return json.loads(json_match.group())
             raise ValueError(f"Failed to parse JSON from response: {response}")
 
+    def _generate_demo_config(self, intent: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate realistic demo config based on intent."""
+        action = intent.get("action", "")
+        params = intent.get("parameters", {})
+        devices = intent.get("target_devices", ["Router-1"])
+
+        if action == "modify_ospf_area":
+            new_area = params.get("new_area", 10)
+            interfaces = params.get("interfaces", ["GigabitEthernet2"])
+            process_id = params.get("ospf_process_id", 1)
+
+            commands = [
+                f"router ospf {process_id}",
+            ]
+            rollback_commands = [
+                f"router ospf {process_id}",
+            ]
+
+            for iface in interfaces:
+                commands.append(f"  interface {iface}")
+                commands.append(f"    ip ospf {process_id} area {new_area}")
+                rollback_commands.append(f"  interface {iface}")
+                rollback_commands.append(f"    ip ospf {process_id} area 0")
+
+            return {
+                "commands": commands,
+                "rollback_commands": rollback_commands,
+                "target_devices": devices,
+                "explanation": f"Configure OSPF area {new_area} on interfaces {', '.join(interfaces)}",
+                "risk_level": "medium",
+                "estimated_impact": "Brief OSPF neighbor flap during area transition"
+            }
+
+        elif action == "rotate_credentials":
+            return {
+                "commands": [
+                    "enable algorithm-type sha256 secret NewSecureP@ss2024!",
+                    "username admin privilege 15 algorithm-type sha256 secret NewSecureP@ss2024!"
+                ],
+                "rollback_commands": [
+                    "enable algorithm-type sha256 secret OldP@ssword123",
+                    "username admin privilege 15 algorithm-type sha256 secret OldP@ssword123"
+                ],
+                "target_devices": devices,
+                "explanation": "Rotate enable secret and admin credentials with SHA-256 hashing",
+                "risk_level": "low",
+                "estimated_impact": "No service impact expected"
+            }
+
+        elif action == "apply_security_patch":
+            cve = params.get("cve_id", "CVE-2024-1234")
+            return {
+                "commands": [
+                    "ip access-list extended CVE-2024-1234-BLOCK",
+                    "  deny tcp any any eq 445 log",
+                    "  deny udp any any eq 445 log",
+                    "  permit ip any any",
+                    "interface GigabitEthernet1",
+                    "  ip access-group CVE-2024-1234-BLOCK in"
+                ],
+                "rollback_commands": [
+                    "no ip access-list extended CVE-2024-1234-BLOCK",
+                    "interface GigabitEthernet1",
+                    "  no ip access-group CVE-2024-1234-BLOCK in"
+                ],
+                "target_devices": devices,
+                "explanation": f"Apply security ACL to block exploit traffic for {cve}",
+                "risk_level": "low",
+                "estimated_impact": "Potential minor latency increase from ACL processing"
+            }
+
+        else:
+            return {
+                "commands": ["! No specific commands generated"],
+                "rollback_commands": ["! No rollback needed"],
+                "target_devices": devices,
+                "explanation": "Generic configuration placeholder",
+                "risk_level": "unknown",
+                "estimated_impact": "Unknown"
+            }
+
     async def analyze_results(
         self,
         config: Dict[str, Any],
@@ -238,6 +397,11 @@ class LLMService:
         Returns:
             Analysis results as dictionary
         """
+        # Demo mode: return realistic mock analysis
+        if self.demo_mode:
+            logger.info("Demo mode: returning mock analysis")
+            return self._generate_demo_analysis(config, splunk_results)
+
         prompt = analysis_prompt.replace("{{config}}", json.dumps(config, indent=2))
         prompt = prompt.replace("{{splunk_results}}", json.dumps(splunk_results, indent=2))
         prompt = prompt.replace("{{time_window}}", time_window)
@@ -261,6 +425,59 @@ class LLMService:
             if json_match:
                 return json.loads(json_match.group())
             raise ValueError(f"Failed to parse JSON from response: {response}")
+
+    def _generate_demo_analysis(self, config: Dict[str, Any], splunk_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate realistic demo analysis results."""
+        explanation = config.get("explanation", "Configuration change")
+
+        return {
+            "status": "healthy",
+            "overall_score": 95,
+            "summary": f"Configuration change applied successfully. {explanation}",
+            "findings": [
+                {
+                    "category": "OSPF Convergence",
+                    "status": "ok",
+                    "message": "OSPF neighbors re-established within 5 seconds",
+                    "severity": "info"
+                },
+                {
+                    "category": "Interface Status",
+                    "status": "ok",
+                    "message": "All configured interfaces are up/up",
+                    "severity": "info"
+                },
+                {
+                    "category": "CPU Utilization",
+                    "status": "ok",
+                    "message": "CPU utilization within normal range (12%)",
+                    "severity": "info"
+                },
+                {
+                    "category": "Memory Usage",
+                    "status": "ok",
+                    "message": "Memory usage stable at 45%",
+                    "severity": "info"
+                }
+            ],
+            "metrics": {
+                "ospf_convergence_time_ms": 4850,
+                "neighbor_count": 3,
+                "routes_in_area": 12,
+                "cpu_utilization_percent": 12,
+                "memory_utilization_percent": 45
+            },
+            "recommendation": "approve",
+            "recommendation_reason": "All health checks passed. OSPF converged successfully with no anomalies detected.",
+            "risk_assessment": {
+                "level": "low",
+                "factors": [
+                    "Single area configuration change",
+                    "No traffic disruption observed",
+                    "All neighbors stable"
+                ]
+            }
+        }
 
     async def generate_notification(
         self,

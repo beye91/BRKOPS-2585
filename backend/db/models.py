@@ -18,7 +18,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID, ENUM
 from sqlalchemy.orm import relationship
 
 from db.database import Base
@@ -47,6 +47,19 @@ class PipelineStage(str, enum.Enum):
     AI_ANALYSIS = "ai_analysis"
     NOTIFICATIONS = "notifications"
     HUMAN_DECISION = "human_decision"
+
+
+# PostgreSQL ENUM types (must match database schema)
+pipeline_stage_enum = ENUM(
+    'voice_input', 'intent_parsing', 'config_generation', 'cml_deployment',
+    'monitoring', 'splunk_analysis', 'ai_analysis', 'notifications', 'human_decision',
+    name='pipeline_stage', create_type=False
+)
+
+job_status_enum = ENUM(
+    'pending', 'queued', 'running', 'paused', 'completed', 'failed', 'cancelled',
+    name='job_status', create_type=False
+)
 
 
 class NotificationChannel(str, enum.Enum):
@@ -128,8 +141,8 @@ class PipelineJob(Base):
     use_case_name = Column(String(100), nullable=False)
     input_text = Column(Text, nullable=False)
     input_audio_url = Column(Text)
-    current_stage = Column(String(50), nullable=False, default='voice_input')
-    status = Column(String(50), nullable=False, default='pending')
+    current_stage = Column(pipeline_stage_enum, nullable=False, default='voice_input')
+    status = Column(job_status_enum, nullable=False, default='pending')
     stages_data = Column(JSONB, default={})
     result = Column(JSONB)
     error_message = Column(Text)

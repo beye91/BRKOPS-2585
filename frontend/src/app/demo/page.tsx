@@ -45,6 +45,32 @@ export default function DemoPage() {
     queryFn: () => adminApi.listUseCases().then((res) => res.data),
   });
 
+  // Fetch most recent active operation on page load
+  useEffect(() => {
+    const fetchActiveOperation = async () => {
+      try {
+        const response = await operationsApi.list();
+        const operations = response.data;
+        // Find the most recent running/paused/queued operation
+        const activeOp = operations.find(
+          (op: any) => ['running', 'paused', 'queued'].includes(op.status)
+        );
+        if (activeOp) {
+          // Fetch full details
+          const fullOp = await operationsApi.get(activeOp.id);
+          setCurrentOperation(fullOp.data);
+          // Set transcript from the operation
+          if (fullOp.data.input_text) {
+            setTranscript(fullOp.data.input_text);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch active operation:', error);
+      }
+    };
+    fetchActiveOperation();
+  }, [setCurrentOperation]);
+
   // Process WebSocket messages
   useEffect(() => {
     if (messages.length === 0) return;

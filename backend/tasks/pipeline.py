@@ -10,6 +10,7 @@ from uuid import UUID
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from config import settings
 from db.database import async_session
@@ -81,6 +82,7 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
                 # Update current stage
                 job.current_stage = stage
                 job.stages_data[stage.value] = {"status": "running", "started_at": datetime.utcnow().isoformat()}
+                flag_modified(job, 'stages_data')
                 await db.commit()
 
                 # Broadcast stage change
@@ -93,7 +95,7 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
 
                 # Process stage
                 try:
-                    stage_result = await processor(ctx, job, use_case, db)
+                    stage_result = await processor(ctx, job, use_case, db, demo_mode=demo_mode)
 
                     # Update stage data
                     job.stages_data[stage.value] = {
@@ -101,6 +103,7 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
                         "data": stage_result,
                         "completed_at": datetime.utcnow().isoformat(),
                     }
+                    flag_modified(job, 'stages_data')
                     await db.commit()
 
                     # Broadcast completion
@@ -119,6 +122,7 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
                         "error": str(e),
                         "completed_at": datetime.utcnow().isoformat(),
                     }
+                    flag_modified(job, 'stages_data')
                     job.status = JobStatus.FAILED
                     job.error_message = f"Stage {stage.value} failed: {str(e)}"
                     await db.commit()
@@ -183,7 +187,7 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
             })
 
 
-async def process_voice_input(ctx: dict, job: PipelineJob, use_case: UseCase, db) -> Dict[str, Any]:
+async def process_voice_input(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
     """Process voice input stage."""
     logger.info("Processing voice input", job_id=str(job.id))
 
@@ -197,11 +201,11 @@ async def process_voice_input(ctx: dict, job: PipelineJob, use_case: UseCase, db
     }
 
 
-async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase, db) -> Dict[str, Any]:
+async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
     """Parse intent from transcript using LLM."""
     logger.info("Parsing intent", job_id=str(job.id))
 
-    llm_service = LLMService()
+    llm_service = LLMService(demo_mode=demo_mode)
 
     # Get intent prompt from use case or default
     intent_prompt = use_case.intent_prompt if use_case else """
@@ -223,11 +227,11 @@ async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase,
     return intent
 
 
-async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCase, db) -> Dict[str, Any]:
+async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
     """Generate configuration from intent."""
     logger.info("Generating config", job_id=str(job.id))
 
-    llm_service = LLMService()
+    llm_service = LLMService(demo_mode=demo_mode)
 
     # Get previous stage data
     intent = job.stages_data.get("intent_parsing", {}).get("data", {})
@@ -251,7 +255,7 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
     return config
 
 
-async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase, db) -> Dict[str, Any]:
+async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
     """Deploy configuration to CML."""
     logger.info("Deploying to CML", job_id=str(job.id))
 
@@ -322,7 +326,7 @@ async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase,
         }
 
 
-async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db) -> Dict[str, Any]:
+async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
     """Wait for network convergence and collect initial logs."""
     logger.info("Monitoring convergence", job_id=str(job.id))
 
@@ -338,7 +342,7 @@ async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db)
     }
 
 
-async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase, db) -> Dict[str, Any]:
+async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
     """Query Splunk for post-change logs."""
     logger.info("Querying Splunk", job_id=str(job.id))
 
@@ -394,11 +398,11 @@ async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase
         }
 
 
-async def process_ai_analysis(ctx: dict, job: PipelineJob, use_case: UseCase, db) -> Dict[str, Any]:
+async def process_ai_analysis(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
     """Analyze Splunk results with AI."""
     logger.info("AI analysis", job_id=str(job.id))
 
-    llm_service = LLMService()
+    llm_service = LLMService(demo_mode=demo_mode)
 
     # Get data from previous stages
     config = job.stages_data.get("config_generation", {}).get("data", {})
@@ -435,7 +439,7 @@ async def process_ai_analysis(ctx: dict, job: PipelineJob, use_case: UseCase, db
     return analysis
 
 
-async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, db) -> Dict[str, Any]:
+async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
     """Send notifications based on analysis."""
     logger.info("Sending notifications", job_id=str(job.id))
 
@@ -493,7 +497,7 @@ async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, 
     }
 
 
-async def process_human_decision(ctx: dict, job: PipelineJob, use_case: UseCase, db) -> Dict[str, Any]:
+async def process_human_decision(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
     """Prepare for human decision."""
     logger.info("Awaiting human decision", job_id=str(job.id))
 
