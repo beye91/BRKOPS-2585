@@ -787,11 +787,11 @@ end"""
         results = {}
         for label, config in baseline_configs.items():
             try:
-                # Apply config via CLI using config_command mode
+                # Apply config via CLI using commands parameter (as string)
                 await self._call_tool("send_cli_command", {
                     "lid": lab_id,
                     "label": label,
-                    "command": config,
+                    "commands": config,
                     "config_command": True,
                 })
                 results[label] = "success"
