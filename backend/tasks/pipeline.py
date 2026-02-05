@@ -24,10 +24,164 @@ from services.websocket_manager import manager
 logger = structlog.get_logger()
 
 
+async def continue_pipeline_after_approval(ctx: dict, job_id: str, demo_mode: bool = True):
+    """
+    Continue pipeline processing after human approval.
+    Runs stages 6-10: CML_DEPLOYMENT, MONITORING, SPLUNK_ANALYSIS, AI_VALIDATION, NOTIFICATIONS
+    """
+    logger.info("Continuing pipeline after approval", job_id=job_id, demo_mode=demo_mode)
+
+    async with async_session() as db:
+        # Get job
+        result = await db.execute(select(PipelineJob).where(PipelineJob.id == UUID(job_id)))
+        job = result.scalar_one_or_none()
+
+        if not job:
+            logger.error("Job not found", job_id=job_id)
+            return
+
+        # Verify job is in the right state
+        if job.current_stage != PipelineStage.HUMAN_DECISION:
+            logger.error("Job not at human_decision stage", job_id=job_id, stage=job.current_stage)
+            return
+
+        # Get use case
+        use_case = None
+        if job.use_case_id:
+            result = await db.execute(select(UseCase).where(UseCase.id == job.use_case_id))
+            use_case = result.scalar_one_or_none()
+
+        # Update job status
+        job.status = JobStatus.RUNNING
+        await db.commit()
+
+        # Broadcast resume
+        await manager.broadcast({
+            "type": "operation.resumed",
+            "job_id": job_id,
+            "message": "Continuing after approval",
+        })
+
+        # Post-approval stages
+        post_approval_stages = [
+            (PipelineStage.CML_DEPLOYMENT, process_cml_deployment),
+            (PipelineStage.MONITORING, process_monitoring),
+            (PipelineStage.SPLUNK_ANALYSIS, process_splunk_analysis),
+            (PipelineStage.AI_VALIDATION, process_ai_validation),
+            (PipelineStage.NOTIFICATIONS, process_notifications),
+        ]
+
+        try:
+            for stage, processor in post_approval_stages:
+                # Check if job was cancelled
+                await db.refresh(job)
+                if job.status == JobStatus.CANCELLED:
+                    logger.info("Job cancelled", job_id=job_id)
+                    return
+
+                # Update current stage
+                job.current_stage = stage
+                job.stages_data[stage.value] = {"status": "running", "started_at": datetime.utcnow().isoformat()}
+                flag_modified(job, 'stages_data')
+                await db.commit()
+
+                # Broadcast stage change
+                await manager.send_stage_update(
+                    job_id=job_id,
+                    stage=stage.value,
+                    status="running",
+                    message=f"Processing {stage.value.replace('_', ' ')}...",
+                )
+
+                # Process stage
+                try:
+                    stage_result = await processor(ctx, job, use_case, db, demo_mode=demo_mode)
+
+                    # Update stage data
+                    job.stages_data[stage.value] = {
+                        "status": "completed",
+                        "data": stage_result,
+                        "started_at": job.stages_data[stage.value].get("started_at"),
+                        "completed_at": datetime.utcnow().isoformat(),
+                    }
+                    flag_modified(job, 'stages_data')
+                    await db.commit()
+
+                    # Broadcast completion
+                    await manager.send_stage_update(
+                        job_id=job_id,
+                        stage=stage.value,
+                        status="completed",
+                        data=stage_result,
+                    )
+
+                except Exception as e:
+                    logger.error(f"Stage {stage.value} failed", job_id=job_id, error=str(e))
+
+                    job.stages_data[stage.value] = {
+                        "status": "failed",
+                        "error": str(e),
+                        "started_at": job.stages_data[stage.value].get("started_at"),
+                        "completed_at": datetime.utcnow().isoformat(),
+                    }
+                    flag_modified(job, 'stages_data')
+                    job.status = JobStatus.FAILED
+                    job.error_message = f"Stage {stage.value} failed: {str(e)}"
+                    await db.commit()
+
+                    # Broadcast error
+                    await manager.broadcast({
+                        "type": "operation.error",
+                        "job_id": job_id,
+                        "stage": stage.value,
+                        "error": str(e),
+                    })
+                    return
+
+                # Demo mode: pause after each stage
+                if demo_mode:
+                    job.status = JobStatus.PAUSED
+                    await db.commit()
+
+                    await manager.broadcast({
+                        "type": "operation.paused",
+                        "job_id": job_id,
+                        "stage": stage.value,
+                        "message": "Waiting for manual advancement",
+                    })
+
+                    await asyncio.sleep(1)
+                    job.status = JobStatus.RUNNING
+                    await db.commit()
+
+            # Job completed successfully
+            job.status = JobStatus.COMPLETED
+            job.completed_at = datetime.utcnow()
+            await db.commit()
+
+            await manager.broadcast({
+                "type": "operation.completed",
+                "job_id": job_id,
+            })
+
+        except Exception as e:
+            logger.error("Pipeline continuation failed", job_id=job_id, error=str(e))
+            job.status = JobStatus.FAILED
+            job.error_message = str(e)
+            await db.commit()
+
+            await manager.broadcast({
+                "type": "operation.error",
+                "job_id": job_id,
+                "error": str(e),
+            })
+
+
 async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
     """
     Main pipeline job processor.
-    Orchestrates all 9 stages of the pipeline.
+    Orchestrates all 10 stages of the pipeline.
+    Pauses at HUMAN_DECISION stage for approval before deployment.
     """
     logger.info("Processing pipeline job", job_id=job_id, demo_mode=demo_mode)
 
@@ -59,17 +213,20 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
         })
 
         try:
-            # Process each stage
+            # Process each stage in correct order
+            # Human decision now happens BEFORE deployment!
             stages = [
                 (PipelineStage.VOICE_INPUT, process_voice_input),
                 (PipelineStage.INTENT_PARSING, process_intent_parsing),
                 (PipelineStage.CONFIG_GENERATION, process_config_generation),
+                (PipelineStage.AI_ADVICE, process_ai_advice),
+                (PipelineStage.HUMAN_DECISION, process_human_decision),
+                # Stages below only run if human approves
                 (PipelineStage.CML_DEPLOYMENT, process_cml_deployment),
                 (PipelineStage.MONITORING, process_monitoring),
                 (PipelineStage.SPLUNK_ANALYSIS, process_splunk_analysis),
-                (PipelineStage.AI_ANALYSIS, process_ai_analysis),
+                (PipelineStage.AI_VALIDATION, process_ai_validation),
                 (PipelineStage.NOTIFICATIONS, process_notifications),
-                (PipelineStage.HUMAN_DECISION, process_human_decision),
             ]
 
             for stage, processor in stages:
@@ -136,8 +293,23 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
                     })
                     return
 
-                # Demo mode: pause after each stage
-                if demo_mode and stage != PipelineStage.HUMAN_DECISION:
+                # Human decision stage: pause and wait for approval BEFORE deployment
+                if stage == PipelineStage.HUMAN_DECISION:
+                    job.status = JobStatus.PAUSED
+                    await db.commit()
+
+                    await manager.broadcast({
+                        "type": "operation.awaiting_approval",
+                        "job_id": job_id,
+                        "message": "Awaiting human approval before deployment",
+                    })
+
+                    # Stop processing here - approve endpoint will resume pipeline
+                    logger.info("Pipeline paused for human approval", job_id=job_id)
+                    return
+
+                # Demo mode: pause after each stage (except human_decision which pauses above)
+                if demo_mode:
                     job.status = JobStatus.PAUSED
                     await db.commit()
 
@@ -154,25 +326,15 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
                     job.status = JobStatus.RUNNING
                     await db.commit()
 
-            # Job completed successfully
-            if job.current_stage == PipelineStage.HUMAN_DECISION:
-                # Wait for human decision (handled by approve endpoint)
-                job.status = JobStatus.PAUSED
-                await db.commit()
+            # Job completed successfully (after all stages including post-approval)
+            job.status = JobStatus.COMPLETED
+            job.completed_at = datetime.utcnow()
+            await db.commit()
 
-                await manager.broadcast({
-                    "type": "operation.awaiting_approval",
-                    "job_id": job_id,
-                })
-            else:
-                job.status = JobStatus.COMPLETED
-                job.completed_at = datetime.utcnow()
-                await db.commit()
-
-                await manager.broadcast({
-                    "type": "operation.completed",
-                    "job_id": job_id,
-                })
+            await manager.broadcast({
+                "type": "operation.completed",
+                "job_id": job_id,
+            })
 
         except Exception as e:
             logger.error("Pipeline job failed", job_id=job_id, error=str(e))
@@ -253,6 +415,28 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
     logger.info("Config generated", job_id=str(job.id), command_count=len(config.get("commands", [])))
 
     return config
+
+
+async def process_ai_advice(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+    """Generate AI advice and risk assessment before human decision."""
+    logger.info("Generating AI advice", job_id=str(job.id))
+
+    llm_service = LLMService(demo_mode=demo_mode)
+
+    # Get data from previous stages
+    intent = job.stages_data.get("intent_parsing", {}).get("data", {})
+    config = job.stages_data.get("config_generation", {}).get("data", {})
+
+    advice = await llm_service.generate_advice(intent, config)
+
+    logger.info(
+        "AI advice generated",
+        job_id=str(job.id),
+        recommendation=advice.get("recommendation"),
+        risk_level=advice.get("risk_level"),
+    )
+
+    return advice
 
 
 async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
@@ -398,56 +582,66 @@ async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase
         }
 
 
-async def process_ai_analysis(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
-    """Analyze Splunk results with AI."""
-    logger.info("AI analysis", job_id=str(job.id))
+async def process_ai_validation(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+    """Validate deployment results with AI (post-deployment analysis)."""
+    logger.info("AI validation", job_id=str(job.id))
 
     llm_service = LLMService(demo_mode=demo_mode)
 
     # Get data from previous stages
     config = job.stages_data.get("config_generation", {}).get("data", {})
+    deployment_result = job.stages_data.get("cml_deployment", {}).get("data", {})
     splunk_results = job.stages_data.get("splunk_analysis", {}).get("data", {})
 
-    # Get analysis prompt
-    analysis_prompt = use_case.analysis_prompt if use_case else """
-    Analyze the following Splunk results after configuration change:
+    # Get validation/analysis prompt
+    validation_prompt = use_case.analysis_prompt if use_case else """
+    Validate the following deployment results:
 
     Configuration: {{config}}
+    Deployment Result: {{deployment_result}}
     Splunk Results: {{splunk_results}}
     Time Window: {{time_window}}
 
-    Provide analysis in JSON format with:
-    - severity: INFO, WARNING, or CRITICAL
+    Provide validation in JSON format with:
+    - validation_status: PASSED, WARNING, or FAILED
     - findings: List of findings
     - recommendation: Recommended action
-    - requires_action: Boolean
+    - deployment_verified: Boolean
     """
 
-    analysis = await llm_service.analyze_results(
+    validation = await llm_service.validate_deployment(
         config=config,
+        deployment_result=deployment_result,
         splunk_results=splunk_results,
-        analysis_prompt=analysis_prompt,
+        validation_prompt=validation_prompt,
         time_window="5 minutes",
     )
 
     logger.info(
-        "Analysis complete",
+        "Validation complete",
         job_id=str(job.id),
-        severity=analysis.get("severity"),
+        status=validation.get("validation_status"),
     )
 
-    return analysis
+    return validation
 
 
 async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
-    """Send notifications based on analysis."""
+    """Send notifications based on validation results."""
     logger.info("Sending notifications", job_id=str(job.id))
 
     notification_service = NotificationService()
 
-    # Get analysis results
-    analysis = job.stages_data.get("ai_analysis", {}).get("data", {})
-    severity = analysis.get("severity", "INFO")
+    # Get validation results (renamed from ai_analysis)
+    validation = job.stages_data.get("ai_validation", {}).get("data", {})
+    # Determine severity from validation status
+    validation_status = validation.get("validation_status", "PASSED")
+    if validation_status == "FAILED":
+        severity = "CRITICAL"
+    elif validation_status == "WARNING":
+        severity = "WARNING"
+    else:
+        severity = "INFO"
 
     # Get notification template
     template = use_case.notification_template if use_case else {}
@@ -498,19 +692,20 @@ async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, 
 
 
 async def process_human_decision(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
-    """Prepare for human decision."""
-    logger.info("Awaiting human decision", job_id=str(job.id))
+    """Prepare for human decision BEFORE deployment."""
+    logger.info("Awaiting human decision before deployment", job_id=str(job.id))
 
-    # Compile summary for human review
+    # Compile summary for human review (pre-deployment)
+    # Note: This happens BEFORE CML deployment - human approves the plan, not the result
     summary = {
         "job_id": str(job.id),
         "use_case": job.use_case_name,
         "input": job.input_text,
         "intent": job.stages_data.get("intent_parsing", {}).get("data", {}),
         "config": job.stages_data.get("config_generation", {}).get("data", {}),
-        "deployment": job.stages_data.get("cml_deployment", {}).get("data", {}),
-        "analysis": job.stages_data.get("ai_analysis", {}).get("data", {}),
+        "ai_advice": job.stages_data.get("ai_advice", {}).get("data", {}),
         "awaiting_approval": True,
+        "message": "Please review the proposed configuration and AI advice before deployment.",
     }
 
     return summary

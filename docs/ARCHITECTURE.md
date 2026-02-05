@@ -111,11 +111,14 @@ This platform enables AI-driven network operations demonstration for Cisco Live 
 +====================================================================================+
 ```
 
-### 2.2 Demo Pipeline Flow (9 Stages)
+### 2.2 Demo Pipeline Flow (10 Stages)
+
+**Key Design:** Human approval happens BEFORE deployment, not after!
 
 ```
 +--------------------------------------------------------------------------------+
 |                              DEMO PIPELINE FLOW                                |
+|                    (Human Approval BEFORE Deployment)                          |
 +--------------------------------------------------------------------------------+
 |                                                                                |
 |  Stage 1: VOICE INPUT                                                         |
@@ -140,10 +143,32 @@ This platform enables AI-driven network operations demonstration for Cisco Live 
 |  |  router ospf 1                                                           | |
 |  |    network 10.0.0.0 0.0.0.255 area 10                                    | |
 |  |  ! Changed from area 0 to area 10                                        | |
+|  |  ! Rollback commands also generated                                      | |
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 4: CML DEPLOYMENT (MCP)                                                |
+|  Stage 4: AI ADVICE (LLM) [NEW]                                               |
+|  +--------------------------------------------------------------------------+ |
+|  |  GPT-4 reviews proposed changes:                                         | |
+|  |  * Risk Level: MEDIUM                                                    | |
+|  |  * Risk Factors: OSPF area change causes neighbor adjacency reset        | |
+|  |  * Mitigation: Ensure backup paths exist                                 | |
+|  |  * Recommendation: APPROVE                                               | |
+|  |  * Pre-checks: Verify current OSPF state, confirm rollback commands      | |
+|  +--------------------------------------------------------------------------+ |
+|                                       |                                        |
+|                                       v                                        |
+|  Stage 5: HUMAN DECISION [MOVED - NOW BEFORE DEPLOYMENT]                      |
+|  +--------------------------------------------------------------------------+ |
+|  |  Engineer reviews AI Advice and proposed config:                         | |
+|  |  [Approve & Deploy] [Reject]                                             | |
+|  |                                                                          | |
+|  |  -> Pipeline PAUSES here until human approves                            | |
+|  |  -> NO deployment has occurred yet!                                      | |
+|  +--------------------------------------------------------------------------+ |
+|                                       |                                        |
+|                                       v (only if approved)                     |
+|  Stage 6: CML DEPLOYMENT (MCP)                                                |
 |  +--------------------------------------------------------------------------+ |
 |  |  CML MCP Server Tools:                                                   | |
 |  |  * get_labs() -> Find target lab                                         | |
@@ -153,7 +178,7 @@ This platform enables AI-driven network operations demonstration for Cisco Live 
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 5: MONITORING (Wait + Collect)                                         |
+|  Stage 7: MONITORING (Wait + Collect)                                         |
 |  +--------------------------------------------------------------------------+ |
 |  |  * Wait 30-60 seconds for convergence                                    | |
 |  |  * CML devices send syslog to Splunk                                     | |
@@ -161,38 +186,29 @@ This platform enables AI-driven network operations demonstration for Cisco Live 
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 6: SPLUNK ANALYSIS (MCP)                                               |
+|  Stage 8: SPLUNK ANALYSIS (MCP)                                               |
 |  +--------------------------------------------------------------------------+ |
 |  |  Splunk MCP Server Tools:                                                | |
 |  |  * generate_spl("OSPF errors in last 60 seconds")                        | |
 |  |  * run_splunk_query() -> Execute SPL, get results                        | |
-|  |  * Results: "Routing loop detected between Router-X and Router-Y"        | |
+|  |  * Results: Post-deployment telemetry collected                          | |
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 7: AI ANALYSIS (LLM)                                                   |
+|  Stage 9: AI VALIDATION (LLM) [RENAMED from AI_ANALYSIS]                      |
 |  +--------------------------------------------------------------------------+ |
-|  |  GPT-4 analyzes Splunk results:                                          | |
-|  |  * Finding: Routing loop detected                                        | |
-|  |  * Severity: CRITICAL                                                    | |
-|  |  * Root cause: Area mismatch causing OSPF adjacency flap                 | |
-|  |  * Recommendation: Use area 0 or update neighbor routers                 | |
-|  +--------------------------------------------------------------------------+ |
-|                                       |                                        |
-|                                       v                                        |
-|  Stage 8: NOTIFICATIONS                                                       |
-|  +--------------------------------------------------------------------------+ |
-|  |  WebEx: "What have you done? Routing loop detected! Here's why..."       | |
-|  |  ServiceNow: Auto-create incident ticket with full analysis              | |
+|  |  GPT-4 validates deployment results:                                     | |
+|  |  * Validation Status: PASSED                                             | |
+|  |  * Findings: OSPF neighbors re-established, convergence complete         | |
+|  |  * Metrics: Convergence time 4.8s, 3 neighbors, 12 routes                | |
+|  |  * Deployment Verified: TRUE                                             | |
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 9: HUMAN DECISION                                                      |
+|  Stage 10: NOTIFICATIONS                                                      |
 |  +--------------------------------------------------------------------------+ |
-|  |  Engineer reviews findings:                                              | |
-|  |  [Approve Recommendation] [Reject] [Modify]                              | |
-|  |                                                                          | |
-|  |  -> Morning coffee, stress-free                                          | |
+|  |  WebEx: "Configuration deployed successfully. All health checks passed." | |
+|  |  ServiceNow: Auto-create change record with validation results           | |
 |  +--------------------------------------------------------------------------+ |
 |                                                                                |
 +--------------------------------------------------------------------------------+

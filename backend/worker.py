@@ -9,12 +9,14 @@ from arq.connections import RedisSettings
 from config import settings
 from tasks.pipeline import (
     process_pipeline_job,
+    continue_pipeline_after_approval,
     process_intent_parsing,
     process_config_generation,
+    process_ai_advice,
     process_cml_deployment,
     process_monitoring,
     process_splunk_analysis,
-    process_ai_analysis,
+    process_ai_validation,
     process_notifications,
 )
 from tasks.health import check_mcp_health
@@ -58,12 +60,14 @@ class WorkerSettings:
     # Job functions available to the worker
     functions = [
         process_pipeline_job,
+        continue_pipeline_after_approval,
         process_intent_parsing,
         process_config_generation,
+        process_ai_advice,
         process_cml_deployment,
         process_monitoring,
         process_splunk_analysis,
-        process_ai_analysis,
+        process_ai_validation,
         process_notifications,
     ]
 

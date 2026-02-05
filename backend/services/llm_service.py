@@ -250,6 +250,132 @@ class LLMService:
                 "reasoning": "Generic configuration change request"
             }
 
+    async def generate_advice(
+        self,
+        intent: Dict[str, Any],
+        config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Generate pre-deployment advice and risk assessment.
+
+        Args:
+            intent: Parsed intent dictionary
+            config: Generated configuration dictionary
+
+        Returns:
+            Advice including risk assessment, recommendations, and approval suggestion
+        """
+        # Demo mode: return realistic mock advice
+        if self.demo_mode:
+            logger.info("Demo mode: returning mock advice")
+            return self._generate_demo_advice(intent, config)
+
+        prompt = f"""
+        Review the following network configuration change before deployment:
+
+        Intent: {json.dumps(intent, indent=2)}
+        Configuration: {json.dumps(config, indent=2)}
+
+        Provide a pre-deployment risk assessment in JSON format with:
+        - risk_level: LOW, MEDIUM, or HIGH
+        - risk_factors: List of identified risks
+        - mitigation_steps: Suggested mitigations
+        - impact_assessment: Expected impact description
+        - rollback_ready: Boolean indicating if rollback commands are adequate
+        - recommendation: APPROVE, REVIEW, or REJECT
+        - recommendation_reason: Explanation for the recommendation
+        - pre_checks: List of checks to verify before deployment
+        """
+
+        system_prompt = """You are a senior network engineer reviewing proposed configuration changes.
+        Analyze the change for risks, impact, and provide a clear recommendation.
+        Always respond with valid JSON."""
+
+        response = await self.complete(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            json_response=True,
+        )
+
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError:
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+            raise ValueError(f"Failed to parse JSON from response: {response}")
+
+    def _generate_demo_advice(self, intent: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate realistic demo advice based on intent and config."""
+        action = intent.get("action", "")
+        risk_level = config.get("risk_level", "medium")
+        devices = intent.get("target_devices", ["Router-1"])
+
+        risk_factors = []
+        mitigation_steps = []
+        pre_checks = []
+
+        if action == "modify_ospf_area":
+            risk_factors = [
+                "OSPF area change will cause temporary neighbor adjacency reset",
+                f"Affects {len(devices)} device(s) in the network",
+                "May cause brief traffic rerouting during convergence"
+            ]
+            mitigation_steps = [
+                "Ensure backup paths exist before applying changes",
+                "Apply during maintenance window if possible",
+                "Have rollback commands ready"
+            ]
+            pre_checks = [
+                "Verify current OSPF neighbor state",
+                "Confirm no active maintenance on affected devices",
+                "Check that rollback commands are correct"
+            ]
+        elif action == "rotate_credentials":
+            risk_factors = [
+                "Credential change affects device access",
+                "Concurrent sessions may be impacted"
+            ]
+            mitigation_steps = [
+                "Ensure new credentials are documented securely",
+                "Test access with new credentials immediately after change"
+            ]
+            pre_checks = [
+                "Verify current access to affected devices",
+                "Confirm new password meets complexity requirements"
+            ]
+        elif action == "apply_security_patch":
+            risk_factors = [
+                "ACL changes may impact legitimate traffic",
+                "Blocking rules are permanent until removed"
+            ]
+            mitigation_steps = [
+                "Monitor traffic after applying ACL",
+                "Have NOC on standby for any user reports"
+            ]
+            pre_checks = [
+                "Review ACL entries for correctness",
+                "Verify interface attachment points"
+            ]
+        else:
+            risk_factors = ["Generic configuration change with unknown impact"]
+            mitigation_steps = ["Review carefully before approval"]
+            pre_checks = ["Validate configuration syntax"]
+
+        return {
+            "risk_level": risk_level.upper() if isinstance(risk_level, str) else "MEDIUM",
+            "risk_factors": risk_factors,
+            "mitigation_steps": mitigation_steps,
+            "impact_assessment": config.get("estimated_impact", "Expected brief service impact during change application"),
+            "rollback_ready": bool(config.get("rollback_commands")),
+            "recommendation": "APPROVE",
+            "recommendation_reason": f"Configuration is syntactically correct and follows best practices. {len(devices)} device(s) targeted with adequate rollback commands provided.",
+            "pre_checks": pre_checks,
+            "estimated_duration": "30-60 seconds for configuration application, 15-45 seconds for convergence",
+            "affected_services": ["OSPF routing", "Inter-area traffic"] if "ospf" in action else ["Device access"]
+        }
+
     async def generate_config(
         self,
         intent: Dict[str, Any],
@@ -427,13 +553,14 @@ class LLMService:
             raise ValueError(f"Failed to parse JSON from response: {response}")
 
     def _generate_demo_analysis(self, config: Dict[str, Any], splunk_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate realistic demo analysis results."""
+        """Generate realistic demo analysis/validation results."""
         explanation = config.get("explanation", "Configuration change")
 
         return {
             "status": "healthy",
             "overall_score": 95,
             "summary": f"Configuration change applied successfully. {explanation}",
+            "validation_status": "PASSED",
             "findings": [
                 {
                     "category": "OSPF Convergence",
@@ -467,7 +594,9 @@ class LLMService:
                 "cpu_utilization_percent": 12,
                 "memory_utilization_percent": 45
             },
-            "recommendation": "approve",
+            "deployment_verified": True,
+            "post_deployment_status": "Configuration applied and verified successfully",
+            "recommendation": "No action required",
             "recommendation_reason": "All health checks passed. OSPF converged successfully with no anomalies detected.",
             "risk_assessment": {
                 "level": "low",
@@ -478,6 +607,57 @@ class LLMService:
                 ]
             }
         }
+
+    async def validate_deployment(
+        self,
+        config: Dict[str, Any],
+        deployment_result: Dict[str, Any],
+        splunk_results: Dict[str, Any],
+        validation_prompt: str,
+        time_window: str = "60 seconds",
+    ) -> Dict[str, Any]:
+        """
+        Validate deployment results after CML deployment.
+
+        Args:
+            config: Applied configuration
+            deployment_result: Result from CML deployment stage
+            splunk_results: Results from Splunk query
+            validation_prompt: Template prompt for validation
+            time_window: Time window of analysis
+
+        Returns:
+            Validation results as dictionary
+        """
+        # Demo mode: return realistic mock validation
+        if self.demo_mode:
+            logger.info("Demo mode: returning mock validation")
+            return self._generate_demo_analysis(config, splunk_results)
+
+        prompt = validation_prompt.replace("{{config}}", json.dumps(config, indent=2))
+        prompt = prompt.replace("{{deployment_result}}", json.dumps(deployment_result, indent=2))
+        prompt = prompt.replace("{{splunk_results}}", json.dumps(splunk_results, indent=2))
+        prompt = prompt.replace("{{time_window}}", time_window)
+
+        system_prompt = """You are a network operations analyst validating deployment results.
+        Analyze post-deployment monitoring data to confirm successful deployment.
+        Identify any issues, determine severity, and confirm if the deployment was successful.
+        Always respond with valid JSON."""
+
+        response = await self.complete(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            json_response=True,
+        )
+
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError:
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+            raise ValueError(f"Failed to parse JSON from response: {response}")
 
     async def generate_notification(
         self,

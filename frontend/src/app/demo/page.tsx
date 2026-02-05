@@ -150,6 +150,9 @@ export default function DemoPage() {
   const isAwaitingApproval = currentOperation?.current_stage === 'human_decision' &&
     currentOperation?.status === 'paused';
 
+  // Get AI advice for display in approval panel
+  const aiAdvice = currentOperation?.stages?.ai_advice?.data;
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -282,7 +285,7 @@ export default function DemoPage() {
                   exit={{ opacity: 0, y: -10 }}
                 >
                   <AnalysisReport
-                    analysis={currentOperation?.stages?.ai_analysis?.data}
+                    analysis={currentOperation?.stages?.ai_validation?.data}
                     config={currentOperation?.stages?.config_generation?.data}
                   />
                 </motion.div>
@@ -321,13 +324,40 @@ export default function DemoPage() {
               </div>
             )}
 
-            {/* Approval Panel */}
+            {/* Approval Panel - Now includes AI Advice (pre-deployment review) */}
             {isAwaitingApproval && (
               <ApprovalPanel
-                analysis={currentOperation?.stages?.ai_analysis?.data}
+                analysis={aiAdvice}
                 config={currentOperation?.stages?.config_generation?.data}
                 onApprove={handleApprove}
               />
+            )}
+
+            {/* AI Advice Preview (when available but not yet at approval) */}
+            {aiAdvice && !isAwaitingApproval && (
+              <div className="p-4 bg-background-elevated rounded-xl border border-border">
+                <h3 className="font-semibold mb-3">AI Advice</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">Recommendation</span>
+                    <span className={
+                      aiAdvice.recommendation === 'APPROVE' ? 'text-success' :
+                      aiAdvice.recommendation === 'REVIEW' ? 'text-warning' : 'text-error'
+                    }>
+                      {aiAdvice.recommendation}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">Risk Level</span>
+                    <span className={
+                      aiAdvice.risk_level === 'LOW' ? 'text-success' :
+                      aiAdvice.risk_level === 'MEDIUM' ? 'text-warning' : 'text-error'
+                    }>
+                      {aiAdvice.risk_level}
+                    </span>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* Intent Preview */}

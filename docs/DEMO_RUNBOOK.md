@@ -180,6 +180,8 @@ http://198.18.134.22:3003/admin
 
 ### 3.2 Demo Script: OSPF Configuration Change
 
+**Key Point:** Human approval happens BEFORE deployment, not after!
+
 #### Step 1: Voice Input
 
 **Speaking:** "I want to change the OSPF configuration on Router-1 to use area 10"
@@ -187,7 +189,7 @@ http://198.18.134.22:3003/admin
 **Expected on screen:**
 - Waveform visualization shows recording
 - Transcript appears in real-time
-- Pipeline visualization starts
+- Pipeline visualization starts (10 stages)
 
 #### Step 2: Intent Parsing
 
@@ -212,72 +214,106 @@ http://198.18.134.22:3003/admin
   router ospf 1
     network 10.0.0.0 0.0.0.255 area 10
   ```
+- Rollback commands are also generated
 
-#### Step 4: CML Deployment
+#### Step 4: AI Advice (NEW)
+
+**Narration:** "Before we deploy anything, the AI reviews the proposed changes and assesses risks..."
+
+**Expected on screen:**
+- Stage 4 (AI Advice) becomes active
+- AI Advice panel shows:
+  - **Risk Level:** MEDIUM
+  - **Recommendation:** APPROVE
+  - **Risk Factors:** OSPF area change will cause neighbor adjacency reset
+  - **Pre-checks:** Verify current OSPF state, confirm rollback commands
+
+#### Step 5: Human Decision (NOW BEFORE DEPLOYMENT!)
+
+**Narration:** "And now the human stays in the loop BEFORE any changes are deployed..."
+
+**Expected on screen:**
+- Stage 5 (Human Decision) becomes active
+- "Awaiting Approval" indicator pulses
+- Approval Panel appears with:
+  - AI Advice summary
+  - Proposed configuration
+  - Rollback commands available indicator
+  - **Approve & Deploy** / **Reject** buttons
+
+**Click:** Approve & Deploy
+
+**Narration:** "I approve this change. Now and only now does it deploy to the network."
+
+#### Step 6: CML Deployment (Only After Approval)
 
 **Narration:** "Now we push this to our digital twin in CML..."
 
 **Expected on screen:**
-- Stage 4 (CML Deployment) becomes active
+- Stage 6 (CML Deployment) becomes active
 - Topology view highlights Router-1 (pulses cyan)
 - Deployment status shows "Pushing configuration..."
+- Time badge appears when complete
 
-#### Step 5: Monitoring
+#### Step 7: Monitoring
 
 **Narration:** "We wait for the network to converge and collect logs..."
 
 **Expected on screen:**
-- Stage 5 (Monitoring) becomes active
+- Stage 7 (Monitoring) becomes active
 - Progress indicator showing wait time
 - Log Stream starts populating with syslog entries
 
-#### Step 6: Splunk Analysis
+#### Step 8: Splunk Analysis
 
 **Narration:** "Splunk MCP server queries for OSPF-related events..."
 
 **Expected on screen:**
-- Stage 6 (Splunk Query) becomes active
+- Stage 8 (Splunk Analysis) becomes active
 - SPL query displayed
 - Log entries from Splunk appear in Log Stream
 
-#### Step 7: AI Analysis
+#### Step 9: AI Validation (Renamed from AI Analysis)
 
-**Narration:** "The AI analyzes the Splunk results to identify any issues..."
-
-**Expected on screen:**
-- Stage 7 (Analysis) becomes active
-- Analysis Report panel updates with:
-  - **Severity: CRITICAL**
-  - **Finding:** Routing loop detected
-  - **Affected Devices:** Router-1, Router-2
-  - **Root Cause:** Area mismatch
-  - **Recommendation:** Use area 0 or update neighbors
-
-#### Step 8: Notifications
-
-**Narration:** "The system automatically notifies the team..."
+**Narration:** "The AI validates the deployment was successful..."
 
 **Expected on screen:**
-- Stage 8 (Notifications) becomes active
+- Stage 9 (AI Validation) becomes active
+- Validation Report shows:
+  - **Status:** PASSED
+  - **Findings:** OSPF neighbors re-established within 5 seconds
+  - **Metrics:** Convergence time 4.8s, 3 neighbors, 12 routes
+  - **Deployment Verified:** TRUE
+
+#### Step 10: Notifications
+
+**Narration:** "The system notifies the team of successful deployment..."
+
+**Expected on screen:**
+- Stage 10 (Notifications) becomes active
 - WebEx notification shown as sent
-- ServiceNow ticket reference displayed
+- ServiceNow change record created
 
 **Show on mobile/WebEx:** The actual WebEx message received
 
-#### Step 9: Human Decision
+#### Demo Summary
 
-**Narration:** "And now the human stays in the loop..."
+**Narration:** "Notice the key difference: I approved BEFORE deployment, not after. The AI helped me understand the risks upfront, I made an informed decision, the change was deployed, and the system validated it worked. Morning coffee, stress-free."
+
+### 3.3 Demonstrating Pipeline Stage Details (NEW)
+
+**Narration:** "Click on any completed stage to see exactly what happened..."
+
+**Click:** Any completed stage bubble
 
 **Expected on screen:**
-- Stage 9 (Human Decision) becomes active
-- Approval Panel appears with:
-  - Summary of analysis
-  - Approve / Reject buttons
-  - Optional comment field
+- Modal opens showing:
+  - Stage name and status
+  - Duration (e.g., "2.3s")
+  - Detailed data from that stage
+  - Timestamps
 
-**Click:** Reject button
-
-**Narration:** "I'll reject this because the analysis shows it would cause a routing loop. The system learned, the network is safe, and I can enjoy my morning coffee."
+**Narration:** "Complete transparency into every step of the process."
 
 ### 3.3 Optional: Show Admin Panel
 

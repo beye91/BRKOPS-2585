@@ -52,16 +52,28 @@ CREATE INDEX idx_mcp_servers_active ON mcp_servers(is_active);
 -- Tracks all demo operations through the 9-stage pipeline
 -- =============================================================================
 CREATE TYPE job_status AS ENUM ('pending', 'queued', 'running', 'paused', 'completed', 'failed', 'cancelled');
+-- Pipeline stages in execution order:
+-- 1. voice_input - Capture and transcribe voice command
+-- 2. intent_parsing - LLM extracts structured intent
+-- 3. config_generation - LLM generates Cisco IOS commands
+-- 4. ai_advice - LLM reviews proposed changes, provides risk assessment
+-- 5. human_decision - Approve/reject BEFORE deployment
+-- 6. cml_deployment - Deploy to CML lab (only if approved)
+-- 7. monitoring - Wait for convergence
+-- 8. splunk_analysis - Collect post-deployment telemetry
+-- 9. ai_validation - LLM validates deployment results
+-- 10. notifications - Send alerts with final status
 CREATE TYPE pipeline_stage AS ENUM (
     'voice_input',
     'intent_parsing',
     'config_generation',
+    'ai_advice',
+    'human_decision',
     'cml_deployment',
     'monitoring',
     'splunk_analysis',
-    'ai_analysis',
-    'notifications',
-    'human_decision'
+    'ai_validation',
+    'notifications'
 );
 
 CREATE TABLE IF NOT EXISTS pipeline_jobs (
@@ -76,12 +88,13 @@ CREATE TABLE IF NOT EXISTS pipeline_jobs (
         "voice_input": {"status": "pending", "data": null},
         "intent_parsing": {"status": "pending", "data": null},
         "config_generation": {"status": "pending", "data": null},
+        "ai_advice": {"status": "pending", "data": null},
+        "human_decision": {"status": "pending", "data": null},
         "cml_deployment": {"status": "pending", "data": null},
         "monitoring": {"status": "pending", "data": null},
         "splunk_analysis": {"status": "pending", "data": null},
-        "ai_analysis": {"status": "pending", "data": null},
-        "notifications": {"status": "pending", "data": null},
-        "human_decision": {"status": "pending", "data": null}
+        "ai_validation": {"status": "pending", "data": null},
+        "notifications": {"status": "pending", "data": null}
     }',
     result JSONB,
     error_message TEXT,

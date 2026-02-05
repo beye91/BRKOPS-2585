@@ -65,7 +65,10 @@ async def start_operation(
             )
         use_case_name = use_case.name
 
-    # Create pipeline job
+    # Create pipeline job with new stage order
+    # Stages: voice_input -> intent_parsing -> config_generation -> ai_advice ->
+    #         human_decision -> cml_deployment -> monitoring -> splunk_analysis ->
+    #         ai_validation -> notifications
     job = PipelineJob(
         use_case_id=use_case.id if use_case else None,
         use_case_name=use_case_name,
@@ -77,12 +80,13 @@ async def start_operation(
             "voice_input": {"status": "pending", "data": None},
             "intent_parsing": {"status": "pending", "data": None},
             "config_generation": {"status": "pending", "data": None},
+            "ai_advice": {"status": "pending", "data": None},
+            "human_decision": {"status": "pending", "data": None},
             "cml_deployment": {"status": "pending", "data": None},
             "monitoring": {"status": "pending", "data": None},
             "splunk_analysis": {"status": "pending", "data": None},
-            "ai_analysis": {"status": "pending", "data": None},
+            "ai_validation": {"status": "pending", "data": None},
             "notifications": {"status": "pending", "data": None},
-            "human_decision": {"status": "pending", "data": None},
         },
     )
 
@@ -216,6 +220,8 @@ async def approve_operation(
     Approve or reject an operation awaiting human decision.
 
     This endpoint is called when the pipeline reaches the human_decision stage.
+    If approved, the pipeline continues with CML deployment and subsequent stages.
+    If rejected, the pipeline is cancelled.
     """
     result = await db.execute(select(PipelineJob).where(PipelineJob.id == operation_id))
     job = result.scalar_one_or_none()
@@ -232,6 +238,8 @@ async def approve_operation(
             detail=f"Operation is not awaiting approval (current stage: {job.current_stage})",
         )
 
+    from datetime import datetime
+
     # Update job with decision
     job.stages_data["human_decision"] = {
         "status": "completed",
@@ -239,39 +247,81 @@ async def approve_operation(
             "approved": approval.approved,
             "comment": approval.comment,
             "modified_config": approval.modified_config,
+            "decided_at": datetime.utcnow().isoformat(),
         },
+        "started_at": job.stages_data.get("human_decision", {}).get("started_at"),
+        "completed_at": datetime.utcnow().isoformat(),
     }
 
     if approval.approved:
-        job.status = 'completed'
+        # Continue pipeline with deployment stages
         job.result = {
             "decision": "approved",
             "comment": approval.comment,
         }
+        await db.commit()
+
+        logger.info(
+            "Operation approved, continuing pipeline",
+            job_id=str(operation_id),
+        )
+
+        # Broadcast approval
+        await manager.broadcast({
+            "type": "operation.approved",
+            "job_id": str(operation_id),
+            "comment": approval.comment,
+        })
+
+        # Enqueue continuation of pipeline (stages 6-10)
+        try:
+            redis_pool = await create_pool(
+                RedisSettings(
+                    host=settings.redis_host,
+                    port=settings.redis_port,
+                    password=settings.redis_password or None,
+                )
+            )
+            await redis_pool.enqueue_job(
+                "continue_pipeline_after_approval",
+                str(operation_id),
+                True,  # demo_mode
+            )
+            await redis_pool.close()
+            logger.info("Pipeline continuation enqueued", job_id=str(operation_id))
+        except Exception as e:
+            logger.error("Failed to enqueue pipeline continuation", error=str(e))
+            job.status = 'failed'
+            job.error_message = f"Failed to continue pipeline: {str(e)}"
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to continue pipeline after approval",
+            )
+
+        return {"success": True, "approved": True, "message": "Pipeline continuing with deployment"}
     else:
+        # Rejected - cancel the operation
         job.status = 'cancelled'
         job.result = {
             "decision": "rejected",
             "comment": approval.comment,
         }
+        await db.commit()
 
-    await db.commit()
+        logger.info(
+            "Operation rejected",
+            job_id=str(operation_id),
+        )
 
-    logger.info(
-        "Operation decision recorded",
-        job_id=str(operation_id),
-        approved=approval.approved,
-    )
+        # Broadcast rejection
+        await manager.broadcast({
+            "type": "operation.rejected",
+            "job_id": str(operation_id),
+            "comment": approval.comment,
+        })
 
-    # Broadcast event
-    await manager.broadcast({
-        "type": "operation.completed",
-        "job_id": str(operation_id),
-        "approved": approval.approved,
-        "comment": approval.comment,
-    })
-
-    return {"success": True, "approved": approval.approved}
+        return {"success": True, "approved": False, "message": "Operation rejected"}
 
 
 @router.delete("/{operation_id}")

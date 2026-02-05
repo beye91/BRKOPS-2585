@@ -38,21 +38,36 @@ class JobStatus(str, enum.Enum):
 
 
 class PipelineStage(str, enum.Enum):
+    """
+    Pipeline stages in execution order:
+    1. VOICE_INPUT - Capture and transcribe voice command
+    2. INTENT_PARSING - LLM extracts structured intent
+    3. CONFIG_GENERATION - LLM generates Cisco IOS commands
+    4. AI_ADVICE - LLM reviews proposed changes, provides risk assessment (NEW)
+    5. HUMAN_DECISION - Approve/reject BEFORE deployment (MOVED)
+    6. CML_DEPLOYMENT - Deploy to CML lab (only if approved)
+    7. MONITORING - Wait for convergence
+    8. SPLUNK_ANALYSIS - Collect post-deployment telemetry
+    9. AI_VALIDATION - LLM validates deployment results (RENAMED from AI_ANALYSIS)
+    10. NOTIFICATIONS - Send alerts with final status
+    """
     VOICE_INPUT = "voice_input"
     INTENT_PARSING = "intent_parsing"
     CONFIG_GENERATION = "config_generation"
+    AI_ADVICE = "ai_advice"
+    HUMAN_DECISION = "human_decision"
     CML_DEPLOYMENT = "cml_deployment"
     MONITORING = "monitoring"
     SPLUNK_ANALYSIS = "splunk_analysis"
-    AI_ANALYSIS = "ai_analysis"
+    AI_VALIDATION = "ai_validation"
     NOTIFICATIONS = "notifications"
-    HUMAN_DECISION = "human_decision"
 
 
 # PostgreSQL ENUM types (must match database schema)
 pipeline_stage_enum = ENUM(
-    'voice_input', 'intent_parsing', 'config_generation', 'cml_deployment',
-    'monitoring', 'splunk_analysis', 'ai_analysis', 'notifications', 'human_decision',
+    'voice_input', 'intent_parsing', 'config_generation', 'ai_advice',
+    'human_decision', 'cml_deployment', 'monitoring', 'splunk_analysis',
+    'ai_validation', 'notifications',
     name='pipeline_stage', create_type=False
 )
 
