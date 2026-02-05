@@ -410,6 +410,19 @@ class SplunkClient:
     # ==========================================================================
     # Convenience Methods
     # ==========================================================================
+
+    def _is_ip_address(self, value: str) -> bool:
+        """Check if a string looks like an IP address."""
+        import re
+        ip_pattern = r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'
+        return bool(re.match(ip_pattern, value))
+
+    def _add_host_filter(self, spl: str, device: Optional[str]) -> str:
+        """Add host filter only if device is an IP address (Splunk uses IPs as hosts)."""
+        if device and self._is_ip_address(device):
+            spl += f' host="{device}"'
+        return spl
+
     async def search_ospf_events(
         self,
         earliest: str = "-1h",
@@ -417,8 +430,7 @@ class SplunkClient:
     ) -> Dict[str, Any]:
         """Search for OSPF-related events."""
         spl = 'index=netops (OSPF OR "routing" OR "adjacency")'
-        if device:
-            spl += f' host="{device}"'
+        spl = self._add_host_filter(spl, device)
         spl += ' | sort -_time | head 100'
 
         return await self.run_query(spl, earliest=earliest)
@@ -430,8 +442,7 @@ class SplunkClient:
     ) -> Dict[str, Any]:
         """Search for routing errors and warnings."""
         spl = 'index=netops (error OR warning OR critical) (routing OR OSPF OR BGP OR EIGRP)'
-        if device:
-            spl += f' host="{device}"'
+        spl = self._add_host_filter(spl, device)
         spl += ' | sort -_time | head 100'
 
         return await self.run_query(spl, earliest=earliest)
@@ -443,8 +454,7 @@ class SplunkClient:
     ) -> Dict[str, Any]:
         """Search for configuration change events."""
         spl = 'index=netops ("config" OR "configuration") ("change" OR "modified" OR "updated")'
-        if device:
-            spl += f' host="{device}"'
+        spl = self._add_host_filter(spl, device)
         spl += ' | sort -_time | head 100'
 
         return await self.run_query(spl, earliest=earliest)
@@ -456,8 +466,7 @@ class SplunkClient:
     ) -> Dict[str, Any]:
         """Search for authentication-related events."""
         spl = 'index=netops (authentication OR login OR "access" OR "denied" OR "failed")'
-        if device:
-            spl += f' host="{device}"'
+        spl = self._add_host_filter(spl, device)
         spl += ' | sort -_time | head 100'
 
         return await self.run_query(spl, earliest=earliest)
@@ -469,7 +478,10 @@ class SplunkClient:
         max_results: int = 500,
     ) -> Dict[str, Any]:
         """Get all logs from a specific device."""
-        spl = f'index=netops host="{device}" | sort -_time'
+        spl = 'index=netops'
+        if self._is_ip_address(device):
+            spl += f' host="{device}"'
+        spl += ' | sort -_time'
         return await self.run_query(spl, earliest=earliest, max_results=max_results)
 
     # ==========================================================================
