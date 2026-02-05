@@ -338,13 +338,28 @@ class SplunkClient:
                 "row_limit": max_results,
             })
 
-            # Normalize result format
+            # Normalize result format - MCP returns structuredContent with results
+            results = []
             if isinstance(result, dict):
-                results = result.get("results", [])
+                # Check for structuredContent first (MCP format)
+                if "structuredContent" in result:
+                    results = result["structuredContent"].get("results", [])
+                elif "results" in result:
+                    results = result["results"]
+                # Also check content array for text-based JSON
+                elif "content" in result and result["content"]:
+                    import json
+                    for content in result["content"]:
+                        if isinstance(content, dict) and content.get("type") == "text":
+                            try:
+                                parsed = json.loads(content.get("text", "{}"))
+                                if "results" in parsed:
+                                    results = parsed["results"]
+                                    break
+                            except json.JSONDecodeError:
+                                pass
             elif isinstance(result, list):
                 results = result
-            else:
-                results = []
 
             logger.info(
                 "SPL query executed",
