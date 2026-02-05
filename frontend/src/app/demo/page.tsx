@@ -17,9 +17,11 @@ import {
   Terminal,
   Activity,
   ArrowLeft,
+  Eye,
+  History,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useOperationsStore } from '@/store/operations';
+import { useOperationsStore, Operation } from '@/store/operations';
 import { useWebSocketStore } from '@/store/websocket';
 import { operationsApi, mcpApi, adminApi } from '@/services/api';
 import { Pipeline } from '@/components/Pipeline';
@@ -28,6 +30,8 @@ import { Topology } from '@/components/Topology';
 import { LogStream } from '@/components/LogStream';
 import { AnalysisReport } from '@/components/AnalysisReport';
 import { ApprovalPanel } from '@/components/ApprovalPanel';
+import { OperationHistoryPanel } from '@/components/OperationHistoryPanel';
+import { OperationDetailModal } from '@/components/OperationDetailModal';
 import { cn, PIPELINE_STAGES } from '@/lib/utils';
 
 export default function DemoPage() {
@@ -35,9 +39,14 @@ export default function DemoPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [selectedUseCase, setSelectedUseCase] = useState<string>('ospf_configuration_change');
+  const [viewingHistoryOp, setViewingHistoryOp] = useState<Operation | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
   const { currentOperation, setCurrentOperation, updateStage, setLoading, setError } = useOperationsStore();
   const { messages, connected } = useWebSocketStore();
+
+  // Determine which operation to display (live or history)
+  const displayOperation = viewingHistoryOp || currentOperation;
 
   // Fetch use cases
   const { data: useCases } = useQuery({
@@ -153,6 +162,27 @@ export default function DemoPage() {
   // Get AI advice for display in approval panel
   const aiAdvice = currentOperation?.stages?.ai_advice?.data;
 
+  // Handler for selecting an operation from history
+  const handleSelectHistoryOperation = (operation: Operation) => {
+    setViewingHistoryOp(operation);
+    // Set transcript from the historical operation
+    if (operation.input_text) {
+      setTranscript(operation.input_text);
+    }
+  };
+
+  // Handler to return to live operation
+  const handleBackToLive = () => {
+    setViewingHistoryOp(null);
+    // Restore transcript from current operation if exists
+    if (currentOperation?.input_text) {
+      setTranscript(currentOperation.input_text);
+    }
+  };
+
+  // Check if viewing history
+  const isViewingHistory = viewingHistoryOp !== null;
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -195,14 +225,46 @@ export default function DemoPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
+        {/* History Viewing Banner */}
+        {isViewingHistory && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 flex items-center justify-between p-3 bg-warning/10 border border-warning/20 rounded-lg"
+          >
+            <div className="flex items-center gap-2">
+              <History className="w-5 h-5 text-warning" />
+              <span className="text-sm font-medium text-warning">
+                Viewing Historical Operation: {viewingHistoryOp?.use_case_name?.replace(/_/g, ' ')}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowDetailModal(true)}
+                className="flex items-center gap-1 px-3 py-1.5 bg-background hover:bg-background-elevated rounded-lg text-sm transition-colors"
+              >
+                <Eye className="w-4 h-4" />
+                View Details
+              </button>
+              <button
+                onClick={handleBackToLive}
+                className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white rounded-lg text-sm hover:bg-primary-hover transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back to Live
+              </button>
+            </div>
+          </motion.div>
+        )}
+
         {/* Pipeline Visualization */}
         <div className="mb-8">
           <Pipeline
             stages={PIPELINE_STAGES}
-            currentStage={currentOperation?.current_stage || ''}
-            stagesData={currentOperation?.stages || {}}
-            onAdvance={handleAdvance}
-            isPaused={currentOperation?.status === 'paused'}
+            currentStage={displayOperation?.current_stage || ''}
+            stagesData={displayOperation?.stages || {}}
+            onAdvance={isViewingHistory ? undefined : handleAdvance}
+            isPaused={displayOperation?.status === 'paused'}
           />
         </div>
 
@@ -258,7 +320,7 @@ export default function DemoPage() {
                 >
                   <Topology
                     affectedDevices={
-                      currentOperation?.stages?.intent_parsing?.data?.target_devices || []
+                      displayOperation?.stages?.intent_parsing?.data?.target_devices || []
                     }
                   />
                 </motion.div>
@@ -272,7 +334,7 @@ export default function DemoPage() {
                   exit={{ opacity: 0, y: -10 }}
                 >
                   <LogStream
-                    logs={currentOperation?.stages?.splunk_analysis?.data?.results || []}
+                    logs={displayOperation?.stages?.splunk_analysis?.data?.results || []}
                   />
                 </motion.div>
               )}
@@ -285,8 +347,8 @@ export default function DemoPage() {
                   exit={{ opacity: 0, y: -10 }}
                 >
                   <AnalysisReport
-                    analysis={currentOperation?.stages?.ai_validation?.data}
-                    config={currentOperation?.stages?.config_generation?.data}
+                    analysis={displayOperation?.stages?.ai_validation?.data}
+                    config={displayOperation?.stages?.config_generation?.data}
                   />
                 </motion.div>
               )}
@@ -296,36 +358,38 @@ export default function DemoPage() {
           {/* Side Panel */}
           <div className="space-y-6">
             {/* Current Operation Status */}
-            {currentOperation && (
+            {displayOperation && (
               <div className="p-4 bg-background-elevated rounded-xl border border-border">
-                <h3 className="font-semibold mb-3">Current Operation</h3>
+                <h3 className="font-semibold mb-3">
+                  {isViewingHistory ? 'Historical Operation' : 'Current Operation'}
+                </h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-text-secondary">Status</span>
                     <span className={cn(
                       'font-medium',
-                      currentOperation.status === 'running' && 'text-primary',
-                      currentOperation.status === 'completed' && 'text-success',
-                      currentOperation.status === 'failed' && 'text-error',
-                      currentOperation.status === 'paused' && 'text-warning'
+                      displayOperation.status === 'running' && 'text-primary',
+                      displayOperation.status === 'completed' && 'text-success',
+                      displayOperation.status === 'failed' && 'text-error',
+                      displayOperation.status === 'paused' && 'text-warning'
                     )}>
-                      {currentOperation.status.toUpperCase()}
+                      {displayOperation.status.toUpperCase()}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-text-secondary">Stage</span>
-                    <span>{currentOperation.current_stage.replace(/_/g, ' ')}</span>
+                    <span>{displayOperation.current_stage.replace(/_/g, ' ')}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-text-secondary">Use Case</span>
-                    <span>{currentOperation.use_case_name}</span>
+                    <span>{displayOperation.use_case_name}</span>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Approval Panel - Now includes AI Advice (pre-deployment review) */}
-            {isAwaitingApproval && (
+            {/* Approval Panel - Only show for live operations awaiting approval */}
+            {isAwaitingApproval && !isViewingHistory && (
               <ApprovalPanel
                 analysis={aiAdvice}
                 config={currentOperation?.stages?.config_generation?.data}
@@ -334,26 +398,26 @@ export default function DemoPage() {
             )}
 
             {/* AI Advice Preview (when available but not yet at approval) */}
-            {aiAdvice && !isAwaitingApproval && (
+            {displayOperation?.stages?.ai_advice?.data && !(isAwaitingApproval && !isViewingHistory) && (
               <div className="p-4 bg-background-elevated rounded-xl border border-border">
                 <h3 className="font-semibold mb-3">AI Advice</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-text-secondary">Recommendation</span>
                     <span className={
-                      aiAdvice.recommendation === 'APPROVE' ? 'text-success' :
-                      aiAdvice.recommendation === 'REVIEW' ? 'text-warning' : 'text-error'
+                      displayOperation.stages.ai_advice.data.recommendation === 'APPROVE' ? 'text-success' :
+                      displayOperation.stages.ai_advice.data.recommendation === 'REVIEW' ? 'text-warning' : 'text-error'
                     }>
-                      {aiAdvice.recommendation}
+                      {displayOperation.stages.ai_advice.data.recommendation}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-text-secondary">Risk Level</span>
                     <span className={
-                      aiAdvice.risk_level === 'LOW' ? 'text-success' :
-                      aiAdvice.risk_level === 'MEDIUM' ? 'text-warning' : 'text-error'
+                      displayOperation.stages.ai_advice.data.risk_level === 'LOW' ? 'text-success' :
+                      displayOperation.stages.ai_advice.data.risk_level === 'MEDIUM' ? 'text-warning' : 'text-error'
                     }>
-                      {aiAdvice.risk_level}
+                      {displayOperation.stages.ai_advice.data.risk_level}
                     </span>
                   </div>
                 </div>
@@ -361,27 +425,46 @@ export default function DemoPage() {
             )}
 
             {/* Intent Preview */}
-            {currentOperation?.stages?.intent_parsing?.data && (
+            {displayOperation?.stages?.intent_parsing?.data && (
               <div className="p-4 bg-background-elevated rounded-xl border border-border">
                 <h3 className="font-semibold mb-3">Parsed Intent</h3>
                 <pre className="text-xs overflow-x-auto bg-background p-3 rounded-lg">
-                  {JSON.stringify(currentOperation.stages.intent_parsing.data, null, 2)}
+                  {JSON.stringify(displayOperation.stages.intent_parsing.data, null, 2)}
                 </pre>
               </div>
             )}
 
             {/* Config Preview */}
-            {currentOperation?.stages?.config_generation?.data?.commands && (
+            {displayOperation?.stages?.config_generation?.data?.commands && (
               <div className="p-4 bg-background-elevated rounded-xl border border-border">
                 <h3 className="font-semibold mb-3">Generated Config</h3>
                 <pre className="text-xs font-mono overflow-x-auto bg-background p-3 rounded-lg text-primary">
-                  {currentOperation.stages.config_generation.data.commands.join('\n')}
+                  {displayOperation.stages.config_generation.data.commands.join('\n')}
                 </pre>
               </div>
             )}
           </div>
         </div>
+
+        {/* Operations History Panel */}
+        <div className="mt-8">
+          <OperationHistoryPanel
+            onSelectOperation={handleSelectHistoryOperation}
+            currentOperationId={viewingHistoryOp?.id || currentOperation?.id}
+            limit={10}
+          />
+        </div>
       </main>
+
+      {/* Operation Detail Modal */}
+      <AnimatePresence>
+        {showDetailModal && viewingHistoryOp && (
+          <OperationDetailModal
+            operation={viewingHistoryOp}
+            onClose={() => setShowDetailModal(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
