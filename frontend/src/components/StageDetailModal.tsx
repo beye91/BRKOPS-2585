@@ -190,6 +190,24 @@ export function StageDetailModal({ stage, stageData, onClose }: StageDetailModal
         );
 
       case 'human_decision':
+        // Handle awaiting approval state (before user decision)
+        if (data.awaiting_approval) {
+          return (
+            <div className="space-y-3">
+              <div className="p-3 rounded-lg border bg-warning/10 border-warning/20">
+                <span className="text-sm font-medium text-warning">Awaiting Approval</span>
+                <p className="text-sm mt-1 text-text-muted">{data.message || 'Waiting for human decision...'}</p>
+              </div>
+              {data.ai_advice && (
+                <div className="bg-background p-3 rounded-lg">
+                  <span className="text-xs text-text-muted">AI Recommendation</span>
+                  <p className="font-medium">{data.ai_advice.recommendation || 'N/A'}</p>
+                </div>
+              )}
+            </div>
+          );
+        }
+        // Handle approved/rejected state (after user decision)
         return (
           <div className="space-y-3">
             <div className={cn(
@@ -201,6 +219,11 @@ export function StageDetailModal({ stage, stageData, onClose }: StageDetailModal
               </span>
               {data.comment && (
                 <p className="text-sm mt-1">{data.comment}</p>
+              )}
+              {data.decided_at && (
+                <p className="text-xs text-text-muted mt-2">
+                  Decision made at {formatDate(data.decided_at)}
+                </p>
               )}
             </div>
           </div>
@@ -279,14 +302,97 @@ export function StageDetailModal({ stage, stageData, onClose }: StageDetailModal
       case 'monitoring':
         return (
           <div className="space-y-3">
-            <div className="bg-background p-3 rounded-lg">
-              <span className="text-xs text-text-muted">Convergence Wait</span>
-              <p className="font-medium">{data.wait_seconds} seconds</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-background p-3 rounded-lg">
+                <span className="text-xs text-text-muted">Convergence Wait</span>
+                <p className="font-medium">{data.wait_seconds}s</p>
+              </div>
+              <div className="bg-background p-3 rounded-lg">
+                <span className="text-xs text-text-muted">Device Monitored</span>
+                <p className="font-medium">{data.device || 'N/A'}</p>
+              </div>
             </div>
-            {data.monitoring_complete && (
+
+            {/* OSPF Neighbors */}
+            {data.ospf_neighbors && data.ospf_neighbors.length > 0 && (
+              <div className="bg-background p-3 rounded-lg">
+                <span className="text-xs text-text-muted">OSPF Neighbors ({data.ospf_neighbor_count || data.ospf_neighbors.length})</span>
+                <div className="mt-2 space-y-1">
+                  {data.ospf_neighbors.map((neighbor: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between text-sm">
+                      <span className="font-mono">{neighbor.neighbor_id}</span>
+                      <span className={cn(
+                        'px-2 py-0.5 rounded text-xs',
+                        neighbor.state?.includes('FULL') ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning'
+                      )}>
+                        {neighbor.state}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Interface Status */}
+            {data.interface_status && data.interface_status.length > 0 && (
+              <div className="bg-background p-3 rounded-lg">
+                <span className="text-xs text-text-muted">Interface Status</span>
+                <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                  {data.interface_status.map((iface: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between text-sm">
+                      <span className="font-mono text-xs">{iface.interface}</span>
+                      <span className="text-xs text-text-muted">{iface.ip_address}</span>
+                      <span className={cn(
+                        'px-2 py-0.5 rounded text-xs',
+                        iface.status === 'up' ? 'bg-success/20 text-success' : 'bg-error/20 text-error'
+                      )}>
+                        {iface.status}/{iface.protocol}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Checks Summary */}
+            {data.checks && data.checks.length > 0 && (
+              <div className="bg-background p-3 rounded-lg">
+                <span className="text-xs text-text-muted">Monitoring Checks</span>
+                <ul className="mt-2 space-y-1">
+                  {data.checks.map((check: any, i: number) => (
+                    <li key={i} className="flex items-center gap-2 text-sm">
+                      {check.status === 'completed' ? (
+                        <CheckCircle2 className="w-3 h-3 text-success" />
+                      ) : (
+                        <AlertTriangle className="w-3 h-3 text-warning" />
+                      )}
+                      <span>{check.name}</span>
+                      {check.message && <span className="text-text-muted text-xs">- {check.message}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Errors */}
+            {data.errors && data.errors.length > 0 && (
+              <div className="bg-error/10 border border-error/20 p-3 rounded-lg">
+                <span className="text-xs text-error font-medium">Errors</span>
+                <ul className="mt-1 space-y-1">
+                  {data.errors.map((error: string, i: number) => (
+                    <li key={i} className="text-sm text-error">{error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {data.monitoring_complete && !data.errors?.length && (
               <div className="flex items-center gap-2 text-success">
                 <CheckCircle2 className="w-4 h-4" />
-                <span className="text-sm">Monitoring complete</span>
+                <span className="text-sm">
+                  Monitoring complete
+                  {data.convergence_detected && ' - OSPF converged'}
+                </span>
               </div>
             )}
           </div>

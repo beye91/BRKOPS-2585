@@ -529,19 +529,154 @@ async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase,
 
 
 async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
-    """Wait for network convergence and collect initial logs."""
+    """Monitor network convergence after deployment - collect OSPF status and interface states."""
     logger.info("Monitoring convergence", job_id=str(job.id))
+
+    # Get MCP server configuration
+    from db.models import MCPServer, MCPServerType
+
+    result = await db.execute(
+        select(MCPServer).where(MCPServer.type == MCPServerType.CML, MCPServer.is_active == True)
+    )
+    cml_server = result.scalar_one_or_none()
+
+    # Get deployment info
+    deployment = job.stages_data.get("cml_deployment", {}).get("data", {})
+    device_label = deployment.get("device", "Router-1")
+    lab_id = deployment.get("lab_id")
 
     # Get convergence wait time
     wait_seconds = use_case.convergence_wait_seconds if use_case else settings.pipeline_convergence_wait
 
-    # Wait for convergence
-    await asyncio.sleep(wait_seconds)
-
-    return {
+    monitoring_data = {
         "wait_seconds": wait_seconds,
-        "monitoring_complete": True,
+        "device": device_label,
+        "checks": [],
+        "ospf_neighbors": [],
+        "interface_status": [],
+        "errors": [],
     }
+
+    if not cml_server or not lab_id:
+        # No CML connection, just wait
+        logger.warning("No CML server or lab_id, performing basic wait only")
+        await asyncio.sleep(wait_seconds)
+        monitoring_data["monitoring_complete"] = True
+        monitoring_data["checks"].append({
+            "name": "Convergence Wait",
+            "status": "completed",
+            "message": f"Waited {wait_seconds}s for convergence (no CML monitoring available)"
+        })
+        return monitoring_data
+
+    try:
+        client = CMLClient(cml_server.endpoint, cml_server.auth_config)
+
+        # Initial OSPF check
+        logger.info("Collecting initial OSPF neighbor status", device=device_label)
+        try:
+            ospf_output_before = await client.run_command(lab_id, device_label, "show ip ospf neighbor")
+            monitoring_data["checks"].append({
+                "name": "Initial OSPF Check",
+                "status": "completed",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+        except Exception as e:
+            ospf_output_before = f"Error: {str(e)}"
+            monitoring_data["errors"].append(f"Initial OSPF check failed: {str(e)}")
+
+        # Wait for convergence (split into intervals for progress updates)
+        interval = min(5, wait_seconds)
+        elapsed = 0
+        while elapsed < wait_seconds:
+            await asyncio.sleep(interval)
+            elapsed += interval
+
+            # Broadcast progress
+            await manager.broadcast({
+                "type": "monitoring.progress",
+                "job_id": str(job.id),
+                "elapsed": elapsed,
+                "total": wait_seconds,
+                "message": f"Monitoring convergence... {elapsed}/{wait_seconds}s",
+            })
+
+        # Post-convergence OSPF check
+        logger.info("Collecting post-convergence OSPF neighbor status", device=device_label)
+        try:
+            ospf_output_after = await client.run_command(lab_id, device_label, "show ip ospf neighbor")
+
+            # Parse OSPF neighbors
+            neighbors = []
+            for line in ospf_output_after.split('\n'):
+                if 'FULL' in line or 'TWO-WAY' in line or '2WAY' in line:
+                    parts = line.split()
+                    if len(parts) >= 6:
+                        neighbors.append({
+                            "neighbor_id": parts[0],
+                            "state": parts[2] if len(parts) > 2 else "UNKNOWN",
+                            "interface": parts[-1] if parts else "Unknown",
+                        })
+
+            monitoring_data["ospf_neighbors"] = neighbors
+            monitoring_data["ospf_neighbor_count"] = len(neighbors)
+            monitoring_data["checks"].append({
+                "name": "OSPF Neighbor Verification",
+                "status": "completed" if neighbors else "warning",
+                "message": f"Found {len(neighbors)} OSPF neighbor(s)",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+
+        except Exception as e:
+            ospf_output_after = f"Error: {str(e)}"
+            monitoring_data["errors"].append(f"Post-convergence OSPF check failed: {str(e)}")
+
+        # Interface status check
+        logger.info("Checking interface status", device=device_label)
+        try:
+            interface_output = await client.run_command(lab_id, device_label, "show ip interface brief")
+
+            interfaces = []
+            for line in interface_output.split('\n'):
+                if 'GigabitEthernet' in line or 'Loopback' in line:
+                    parts = line.split()
+                    if len(parts) >= 5:
+                        interfaces.append({
+                            "interface": parts[0],
+                            "ip_address": parts[1],
+                            "status": parts[4] if len(parts) > 4 else "unknown",
+                            "protocol": parts[5] if len(parts) > 5 else "unknown",
+                        })
+
+            monitoring_data["interface_status"] = interfaces
+            up_count = sum(1 for i in interfaces if i.get("status") == "up")
+            monitoring_data["checks"].append({
+                "name": "Interface Status Check",
+                "status": "completed",
+                "message": f"{up_count}/{len(interfaces)} interfaces up",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+
+        except Exception as e:
+            monitoring_data["errors"].append(f"Interface check failed: {str(e)}")
+
+        # Final status
+        monitoring_data["monitoring_complete"] = True
+        monitoring_data["convergence_detected"] = len(monitoring_data.get("ospf_neighbors", [])) > 0
+
+        logger.info(
+            "Monitoring complete",
+            job_id=str(job.id),
+            ospf_neighbors=len(monitoring_data.get("ospf_neighbors", [])),
+            errors=len(monitoring_data.get("errors", [])),
+        )
+
+    except Exception as e:
+        logger.error("Monitoring failed", job_id=str(job.id), error=str(e))
+        monitoring_data["errors"].append(f"Monitoring failed: {str(e)}")
+        monitoring_data["monitoring_complete"] = True
+
+    return monitoring_data
 
 
 async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
