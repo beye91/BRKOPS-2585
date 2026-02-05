@@ -192,7 +192,7 @@ class UseCase(Base):
     analysis_prompt = Column(Text, nullable=False)
     notification_template = Column(JSONB, default={})
     cml_target_lab = Column(String(100))
-    splunk_index = Column(String(100), default="network")
+    splunk_index = Column(String(100), default="netops")
     convergence_wait_seconds = Column(Integer, default=45)
     is_active = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)

@@ -68,7 +68,7 @@ class UseCaseCreate(BaseModel):
     analysis_prompt: str = Field(..., description="LLM prompt for analysis")
     notification_template: Dict[str, Any] = Field(default={}, description="Notification templates")
     cml_target_lab: Optional[str] = Field(None, description="Target CML lab ID")
-    splunk_index: str = Field("network", description="Splunk index to query")
+    splunk_index: str = Field("netops", description="Splunk index to query")
     convergence_wait_seconds: int = Field(45, description="Wait time after config push")
     is_active: bool = Field(True, description="Whether use case is active")
     sort_order: int = Field(0, description="Display sort order")

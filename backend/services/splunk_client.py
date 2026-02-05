@@ -332,10 +332,10 @@ class SplunkClient:
         """
         try:
             result = await self._call_tool("run_splunk_query", {
-                "spl": spl,
+                "query": spl,
                 "earliest_time": earliest,
                 "latest_time": latest,
-                "max_results": max_results,
+                "row_limit": max_results,
             })
 
             # Normalize result format
@@ -365,7 +365,7 @@ class SplunkClient:
     async def generate_spl(
         self,
         description: str,
-        index: str = "network",
+        index: str = "netops",
         additional_context: Optional[str] = None,
     ) -> str:
         """
@@ -416,7 +416,7 @@ class SplunkClient:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for OSPF-related events."""
-        spl = 'index=network (OSPF OR "routing" OR "adjacency")'
+        spl = 'index=netops (OSPF OR "routing" OR "adjacency")'
         if device:
             spl += f' host="{device}"'
         spl += ' | sort -_time | head 100'
@@ -429,7 +429,7 @@ class SplunkClient:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for routing errors and warnings."""
-        spl = 'index=network (error OR warning OR critical) (routing OR OSPF OR BGP OR EIGRP)'
+        spl = 'index=netops (error OR warning OR critical) (routing OR OSPF OR BGP OR EIGRP)'
         if device:
             spl += f' host="{device}"'
         spl += ' | sort -_time | head 100'
@@ -442,7 +442,7 @@ class SplunkClient:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for configuration change events."""
-        spl = 'index=network ("config" OR "configuration") ("change" OR "modified" OR "updated")'
+        spl = 'index=netops ("config" OR "configuration") ("change" OR "modified" OR "updated")'
         if device:
             spl += f' host="{device}"'
         spl += ' | sort -_time | head 100'
@@ -455,7 +455,7 @@ class SplunkClient:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for authentication-related events."""
-        spl = 'index=network (authentication OR login OR "access" OR "denied" OR "failed")'
+        spl = 'index=netops (authentication OR login OR "access" OR "denied" OR "failed")'
         if device:
             spl += f' host="{device}"'
         spl += ' | sort -_time | head 100'
@@ -469,7 +469,7 @@ class SplunkClient:
         max_results: int = 500,
     ) -> Dict[str, Any]:
         """Get all logs from a specific device."""
-        spl = f'index=network host="{device}" | sort -_time'
+        spl = f'index=netops host="{device}" | sort -_time'
         return await self.run_query(spl, earliest=earliest, max_results=max_results)
 
     # ==========================================================================

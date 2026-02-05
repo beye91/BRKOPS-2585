@@ -851,7 +851,7 @@ async def run_splunk_query(
 @router.post("/splunk/generate-spl")
 async def generate_spl(
     description: str,
-    index: str = "network",
+    index: str = "netops",
     db: AsyncSession = Depends(get_db),
 ):
     """Generate SPL query from natural language description."""

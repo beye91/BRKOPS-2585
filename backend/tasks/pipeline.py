@@ -856,7 +856,7 @@ async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase
         device = deployment.get("device")
 
         # Determine query based on use case
-        index = use_case.splunk_index if use_case else "network"
+        index = use_case.splunk_index if use_case else "netops"
 
         if "ospf" in job.use_case_name.lower():
             results = await client.search_ospf_events("-5m", device)

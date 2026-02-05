@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS use_cases (
     analysis_prompt TEXT NOT NULL,
     notification_template JSONB DEFAULT '{}',
     cml_target_lab VARCHAR(100),
-    splunk_index VARCHAR(100) DEFAULT 'network',
+    splunk_index VARCHAR(100) DEFAULT 'netops',
     convergence_wait_seconds INTEGER DEFAULT 45,
     is_active BOOLEAN DEFAULT TRUE,
     sort_order INTEGER DEFAULT 0,
