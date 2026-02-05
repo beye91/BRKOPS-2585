@@ -4,6 +4,7 @@
 # =============================================================================
 
 import base64
+import re
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -322,35 +323,59 @@ class CMLClient:
             node = await self.get_node(lab_id, node_id)
             node_label = node.get("label", node_id)
 
-            # Send config commands via CLI
-            commands = config.strip().split("\n")
-            results = []
-
-            for cmd in commands:
-                if cmd.strip():
-                    result = await self.run_command(lab_id, node_label, cmd.strip())
-                    results.append(result)
-
-            # Optionally save config
+            # Add 'end' and optionally 'write memory' to config
+            full_config = config.strip()
             if save:
-                save_result = await self.run_command(lab_id, node_label, "write memory")
-                results.append(save_result)
+                full_config += "\nend\nwrite memory"
+            else:
+                full_config += "\nend"
+
+            # Send all config commands as a block with config_command flag
+            # This ensures commands are sent in config mode (not exec mode)
+            result = await self._call_tool("send_cli_command", {
+                "lid": lab_id,
+                "label": node_label,
+                "commands": full_config,
+                "config_command": True,
+            })
 
             logger.info(
                 "Configuration applied via CLI",
                 lab_id=lab_id,
                 node_id=node_id,
-                commands_count=len(commands),
+                node_label=node_label,
             )
 
-            return {"status": "success", "outputs": results}
+            return {
+                "success": True,
+                "output": result if isinstance(result, str) else str(result),
+            }
 
         except Exception as e:
+            error_str = str(e)
+            # Workaround for pyATS/unicon bug where state check fails even when
+            # the expected and actual states are identical (false negative)
+            if "Expected device to reach" in error_str and "but landed on" in error_str:
+                # Extract states from error message
+                match = re.search(r"reach '(\w+)' state.*landed on '(\w+)' state", error_str)
+                if match and match.group(1).lower() == match.group(2).lower():
+                    logger.warning(
+                        "Ignoring pyATS false-negative state check error",
+                        lab_id=lab_id,
+                        node_id=node_id,
+                        expected_state=match.group(1),
+                        actual_state=match.group(2),
+                    )
+                    return {
+                        "success": True,
+                        "output": "Configuration applied (pyATS state check bypassed)",
+                    }
+
             logger.error(
                 "Failed to apply config",
                 lab_id=lab_id,
                 node_id=node_id,
-                error=str(e),
+                error=error_str,
             )
             raise
 
@@ -375,11 +400,11 @@ class CMLClient:
             Command output
         """
         try:
-            # MCP tool expects 'lid' and 'label' parameters
+            # MCP tool expects 'lid', 'label', and 'commands' (as a string) parameters
             result = await self._call_tool("send_cli_command", {
                 "lid": lab_id,
                 "label": node_label,
-                "command": command,
+                "commands": command,  # Single command as string
             })
             return result if isinstance(result, str) else str(result)
         except Exception as e:

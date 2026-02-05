@@ -331,7 +331,7 @@ class SplunkClient:
             Query results
         """
         try:
-            result = await self._call_tool("run_query", {
+            result = await self._call_tool("run_splunk_query", {
                 "spl": spl,
                 "earliest_time": earliest,
                 "latest_time": latest,

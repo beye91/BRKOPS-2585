@@ -10,6 +10,9 @@ import {
   Loader2,
   FileCode,
   ArrowRight,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from 'lucide-react';
 import { cn, calculateStageDuration, formatStageDuration, formatDate } from '@/lib/utils';
 
@@ -229,6 +232,61 @@ export function StageDetailModal({ stage, stageData, onClose }: StageDetailModal
           </div>
         );
 
+      case 'baseline_collection':
+        return (
+          <div className="space-y-3">
+            <div className={cn(
+              'p-3 rounded-lg border',
+              data.collected ? 'bg-success/10 border-success/20' : 'bg-warning/10 border-warning/20'
+            )}>
+              <span className="text-sm font-medium">
+                {data.collected ? 'Baseline Collected Successfully' : 'Baseline Collection Skipped'}
+              </span>
+            </div>
+            {data.collected && data.baseline && (
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-background p-3 rounded-lg">
+                    <span className="text-xs text-text-muted">OSPF Neighbors</span>
+                    <p className="font-medium">{data.baseline.ospf_neighbors?.length || 0}</p>
+                  </div>
+                  <div className="bg-background p-3 rounded-lg">
+                    <span className="text-xs text-text-muted">Interfaces</span>
+                    <p className="font-medium">{data.baseline.interfaces?.length || 0}</p>
+                  </div>
+                  <div className="bg-background p-3 rounded-lg">
+                    <span className="text-xs text-text-muted">OSPF Routes</span>
+                    <p className="font-medium">{data.baseline.routes?.length || 0}</p>
+                  </div>
+                </div>
+                {data.baseline.ospf_neighbors && data.baseline.ospf_neighbors.length > 0 && (
+                  <div className="bg-background p-3 rounded-lg">
+                    <span className="text-xs text-text-muted">OSPF Neighbors (Pre-Change)</span>
+                    <div className="mt-2 space-y-1">
+                      {data.baseline.ospf_neighbors.map((neighbor: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between text-sm">
+                          <span className="font-mono">{neighbor.neighbor_id}</span>
+                          <span className={cn(
+                            'px-2 py-0.5 rounded text-xs',
+                            neighbor.state?.includes('FULL') ? 'bg-success/20 text-success' : 'bg-warning/20 text-warning'
+                          )}>
+                            {neighbor.state}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            {data.error && (
+              <div className="bg-error/10 border border-error/20 p-3 rounded-lg">
+                <p className="text-sm text-error">{data.error}</p>
+              </div>
+            )}
+          </div>
+        );
+
       case 'cml_deployment':
         return (
           <div className="space-y-3">
@@ -300,8 +358,32 @@ export function StageDetailModal({ stage, stageData, onClose }: StageDetailModal
         );
 
       case 'monitoring':
+        const getDiffIcon = (change: number) => {
+          if (change > 0) return <TrendingUp className="w-3 h-3 text-success" />;
+          if (change < 0) return <TrendingDown className="w-3 h-3 text-error" />;
+          return <Minus className="w-3 h-3 text-text-muted" />;
+        };
+
+        const getDiffColor = (change: number) => {
+          if (change > 0) return 'text-success';
+          if (change < 0) return 'text-error';
+          return 'text-text-muted';
+        };
+
         return (
           <div className="space-y-3">
+            {/* Deployment Health Status */}
+            {data.deployment_healthy !== undefined && data.deployment_healthy !== null && (
+              <div className={cn(
+                'p-3 rounded-lg border',
+                data.deployment_healthy ? 'bg-success/10 border-success/20' : 'bg-warning/10 border-warning/20'
+              )}>
+                <span className="text-sm font-medium">
+                  {data.deployment_healthy ? 'Deployment Healthy' : 'Deployment May Need Attention'}
+                </span>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-background p-3 rounded-lg">
                 <span className="text-xs text-text-muted">Convergence Wait</span>
@@ -313,10 +395,61 @@ export function StageDetailModal({ stage, stageData, onClose }: StageDetailModal
               </div>
             </div>
 
+            {/* Before/After Diff Comparison */}
+            {data.diff && (
+              <div className="bg-background p-3 rounded-lg">
+                <span className="text-xs text-text-muted font-medium">Before/After Comparison</span>
+                <div className="mt-2 space-y-2">
+                  {data.diff.ospf_neighbors && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span>OSPF Neighbors</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-text-muted">{data.diff.ospf_neighbors.before}</span>
+                        <ArrowRight className="w-3 h-3" />
+                        <span>{data.diff.ospf_neighbors.after}</span>
+                        <span className={cn('flex items-center gap-1', getDiffColor(data.diff.ospf_neighbors.change))}>
+                          {getDiffIcon(data.diff.ospf_neighbors.change)}
+                          ({data.diff.ospf_neighbors.change >= 0 ? '+' : ''}{data.diff.ospf_neighbors.change})
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {data.diff.interfaces_up && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span>Interfaces Up</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-text-muted">{data.diff.interfaces_up.before}</span>
+                        <ArrowRight className="w-3 h-3" />
+                        <span>{data.diff.interfaces_up.after}</span>
+                        <span className={cn('flex items-center gap-1', getDiffColor(data.diff.interfaces_up.change))}>
+                          {getDiffIcon(data.diff.interfaces_up.change)}
+                          ({data.diff.interfaces_up.change >= 0 ? '+' : ''}{data.diff.interfaces_up.change})
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {data.diff.routes && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span>OSPF Routes</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-text-muted">{data.diff.routes.before}</span>
+                        <ArrowRight className="w-3 h-3" />
+                        <span>{data.diff.routes.after}</span>
+                        <span className={cn('flex items-center gap-1', getDiffColor(data.diff.routes.change))}>
+                          {getDiffIcon(data.diff.routes.change)}
+                          ({data.diff.routes.change >= 0 ? '+' : ''}{data.diff.routes.change})
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* OSPF Neighbors */}
             {data.ospf_neighbors && data.ospf_neighbors.length > 0 && (
               <div className="bg-background p-3 rounded-lg">
-                <span className="text-xs text-text-muted">OSPF Neighbors ({data.ospf_neighbor_count || data.ospf_neighbors.length})</span>
+                <span className="text-xs text-text-muted">OSPF Neighbors (Post-Change: {data.ospf_neighbor_count || data.ospf_neighbors.length})</span>
                 <div className="mt-2 space-y-1">
                   {data.ospf_neighbors.map((neighbor: any, i: number) => (
                     <div key={i} className="flex items-center justify-between text-sm">
@@ -336,7 +469,7 @@ export function StageDetailModal({ stage, stageData, onClose }: StageDetailModal
             {/* Interface Status */}
             {data.interface_status && data.interface_status.length > 0 && (
               <div className="bg-background p-3 rounded-lg">
-                <span className="text-xs text-text-muted">Interface Status</span>
+                <span className="text-xs text-text-muted">Interface Status (Post-Change)</span>
                 <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
                   {data.interface_status.map((iface: any, i: number) => (
                     <div key={i} className="flex items-center justify-between text-sm">
@@ -363,6 +496,8 @@ export function StageDetailModal({ stage, stageData, onClose }: StageDetailModal
                     <li key={i} className="flex items-center gap-2 text-sm">
                       {check.status === 'completed' ? (
                         <CheckCircle2 className="w-3 h-3 text-success" />
+                      ) : check.status === 'error' ? (
+                        <XCircle className="w-3 h-3 text-error" />
                       ) : (
                         <AlertTriangle className="w-3 h-3 text-warning" />
                       )}

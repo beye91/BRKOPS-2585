@@ -130,6 +130,12 @@ async def websocket_endpoint(websocket: WebSocket):
     - operation.stage_changed
     - operation.completed
     - operation.error
+    - operation.approved
+    - operation.rejected
+    - operation.awaiting_approval
+    - operation.paused
+    - operation.resumed
+    - monitoring.progress
     - voice.transcript_update
     - config.generated
     - cml.deployment_complete
@@ -147,10 +153,26 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
 
             # Handle client messages (e.g., subscribe to specific job)
-            if data.startswith("subscribe:"):
+            # Support both JSON format and legacy colon-separated format
+            job_id = None
+
+            # Try JSON format first
+            try:
+                import json
+                message = json.loads(data)
+                if message.get("type") == "subscribe" and message.get("job_id"):
+                    job_id = message["job_id"]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            # Fallback to legacy colon-separated format
+            if not job_id and data.startswith("subscribe:"):
                 job_id = data.split(":")[1]
+
+            if job_id:
                 await manager.subscribe_to_job(websocket, job_id)
                 await websocket.send_json({"type": "subscribed", "job_id": job_id})
+                logger.debug("WebSocket subscribed to job", job_id=job_id)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

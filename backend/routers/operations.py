@@ -67,8 +67,8 @@ async def start_operation(
 
     # Create pipeline job with new stage order
     # Stages: voice_input -> intent_parsing -> config_generation -> ai_advice ->
-    #         human_decision -> cml_deployment -> monitoring -> splunk_analysis ->
-    #         ai_validation -> notifications
+    #         human_decision -> baseline_collection -> cml_deployment -> monitoring ->
+    #         splunk_analysis -> ai_validation -> notifications
     job = PipelineJob(
         use_case_id=use_case.id if use_case else None,
         use_case_name=use_case_name,
@@ -82,6 +82,7 @@ async def start_operation(
             "config_generation": {"status": "pending", "data": None},
             "ai_advice": {"status": "pending", "data": None},
             "human_decision": {"status": "pending", "data": None},
+            "baseline_collection": {"status": "pending", "data": None},
             "cml_deployment": {"status": "pending", "data": None},
             "monitoring": {"status": "pending", "data": None},
             "splunk_analysis": {"status": "pending", "data": None},

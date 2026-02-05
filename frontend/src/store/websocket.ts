@@ -77,7 +77,11 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   subscribe: (jobId: string) => {
     const { socket } = get();
     if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(`subscribe:${jobId}`);
+      // Send JSON-formatted subscription message
+      socket.send(JSON.stringify({
+        type: 'subscribe',
+        job_id: jobId
+      }));
     }
   },
 

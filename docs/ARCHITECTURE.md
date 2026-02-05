@@ -111,14 +111,15 @@ This platform enables AI-driven network operations demonstration for Cisco Live 
 +====================================================================================+
 ```
 
-### 2.2 Demo Pipeline Flow (10 Stages)
+### 2.2 Demo Pipeline Flow (11 Stages)
 
 **Key Design:** Human approval happens BEFORE deployment, not after!
+Baseline collection captures network state before changes for comparison.
 
 ```
 +--------------------------------------------------------------------------------+
 |                              DEMO PIPELINE FLOW                                |
-|                    (Human Approval BEFORE Deployment)                          |
+|           (Human Approval BEFORE Deployment + Baseline Collection)             |
 +--------------------------------------------------------------------------------+
 |                                                                                |
 |  Stage 1: VOICE INPUT                                                         |
@@ -147,7 +148,7 @@ This platform enables AI-driven network operations demonstration for Cisco Live 
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 4: AI ADVICE (LLM) [NEW]                                               |
+|  Stage 4: AI ADVICE (LLM)                                                     |
 |  +--------------------------------------------------------------------------+ |
 |  |  GPT-4 reviews proposed changes:                                         | |
 |  |  * Risk Level: MEDIUM                                                    | |
@@ -158,7 +159,7 @@ This platform enables AI-driven network operations demonstration for Cisco Live 
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 5: HUMAN DECISION [MOVED - NOW BEFORE DEPLOYMENT]                      |
+|  Stage 5: HUMAN DECISION                                                      |
 |  +--------------------------------------------------------------------------+ |
 |  |  Engineer reviews AI Advice and proposed config:                         | |
 |  |  [Approve & Deploy] [Reject]                                             | |
@@ -168,7 +169,17 @@ This platform enables AI-driven network operations demonstration for Cisco Live 
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v (only if approved)                     |
-|  Stage 6: CML DEPLOYMENT (MCP)                                                |
+|  Stage 6: BASELINE COLLECTION (MCP)                                           |
+|  +--------------------------------------------------------------------------+ |
+|  |  Collect current network state BEFORE deployment:                        | |
+|  |  * OSPF neighbors (count, states)                                        | |
+|  |  * Interface status (up/down)                                            | |
+|  |  * OSPF routes                                                           | |
+|  |  -> This "before" snapshot enables diff comparison                       | |
+|  +--------------------------------------------------------------------------+ |
+|                                       |                                        |
+|                                       v                                        |
+|  Stage 7: CML DEPLOYMENT (MCP)                                                |
 |  +--------------------------------------------------------------------------+ |
 |  |  CML MCP Server Tools:                                                   | |
 |  |  * get_labs() -> Find target lab                                         | |
@@ -178,15 +189,16 @@ This platform enables AI-driven network operations demonstration for Cisco Live 
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 7: MONITORING (Wait + Collect)                                         |
+|  Stage 8: MONITORING (Wait + Diff Comparison)                                 |
 |  +--------------------------------------------------------------------------+ |
 |  |  * Wait 30-60 seconds for convergence                                    | |
-|  |  * CML devices send syslog to Splunk                                     | |
-|  |  * Logs indexed: OSPF events, routing changes, errors                    | |
+|  |  * Collect post-deployment state (OSPF, interfaces, routes)              | |
+|  |  * Compare with baseline: before/after diff calculated                   | |
+|  |  * Determine if deployment is "healthy" based on diff                    | |
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 8: SPLUNK ANALYSIS (MCP)                                               |
+|  Stage 9: SPLUNK ANALYSIS (MCP)                                               |
 |  +--------------------------------------------------------------------------+ |
 |  |  Splunk MCP Server Tools:                                                | |
 |  |  * generate_spl("OSPF errors in last 60 seconds")                        | |
@@ -195,17 +207,17 @@ This platform enables AI-driven network operations demonstration for Cisco Live 
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 9: AI VALIDATION (LLM) [RENAMED from AI_ANALYSIS]                      |
+|  Stage 10: AI VALIDATION (LLM)                                                |
 |  +--------------------------------------------------------------------------+ |
-|  |  GPT-4 validates deployment results:                                     | |
-|  |  * Validation Status: PASSED                                             | |
-|  |  * Findings: OSPF neighbors re-established, convergence complete         | |
-|  |  * Metrics: Convergence time 4.8s, 3 neighbors, 12 routes                | |
+|  |  GPT-4 validates deployment results using baseline diff:                 | |
+|  |  * Validation Status: PASSED / WARNING / FAILED                          | |
+|  |  * Diff Analysis: Neighbors +0, Interfaces +0, Routes +2                 | |
+|  |  * Findings: OSPF neighbors stable, routes increased (expected)          | |
 |  |  * Deployment Verified: TRUE                                             | |
 |  +--------------------------------------------------------------------------+ |
 |                                       |                                        |
 |                                       v                                        |
-|  Stage 10: NOTIFICATIONS                                                      |
+|  Stage 11: NOTIFICATIONS                                                      |
 |  +--------------------------------------------------------------------------+ |
 |  |  WebEx: "Configuration deployed successfully. All health checks passed." | |
 |  |  ServiceNow: Auto-create change record with validation results           | |

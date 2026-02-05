@@ -22,14 +22,16 @@ export function truncate(str: string, length: number) {
 
 // Pipeline stages in correct execution order
 // Human decision happens BEFORE deployment, not after!
+// Baseline collection captures network state before changes
 export const PIPELINE_STAGES = [
   { key: 'voice_input', name: 'Voice Input', description: 'Capture and transcribe voice command' },
   { key: 'intent_parsing', name: 'Intent Parsing', description: 'Parse intent with LLM' },
   { key: 'config_generation', name: 'Config Generation', description: 'Generate network configuration' },
   { key: 'ai_advice', name: 'AI Advice', description: 'Review changes and assess risks' },
   { key: 'human_decision', name: 'Human Decision', description: 'Approve before deployment' },
+  { key: 'baseline_collection', name: 'Baseline', description: 'Collect network state before changes' },
   { key: 'cml_deployment', name: 'CML Deployment', description: 'Push configuration to CML' },
-  { key: 'monitoring', name: 'Monitoring', description: 'Wait for network convergence' },
+  { key: 'monitoring', name: 'Monitoring', description: 'Compare before/after network state' },
   { key: 'splunk_analysis', name: 'Splunk Analysis', description: 'Query Splunk for logs' },
   { key: 'ai_validation', name: 'AI Validation', description: 'Validate deployment results' },
   { key: 'notifications', name: 'Notifications', description: 'Send alerts via WebEx/ServiceNow' },

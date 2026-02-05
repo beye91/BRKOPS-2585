@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Lightbulb,
   ShieldCheck,
+  Database,
 } from 'lucide-react';
 import { cn, calculateStageDuration, formatStageDuration, getDurationColor } from '@/lib/utils';
 import { StageDetailModal } from './StageDetailModal';
@@ -51,6 +52,7 @@ const stageIcons: Record<string, any> = {
   config_generation: FileCode,
   ai_advice: Lightbulb,
   human_decision: UserCheck,
+  baseline_collection: Database,
   cml_deployment: Upload,
   monitoring: Timer,
   splunk_analysis: Search,

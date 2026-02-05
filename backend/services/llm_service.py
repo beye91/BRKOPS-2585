@@ -615,6 +615,7 @@ class LLMService:
         splunk_results: Dict[str, Any],
         validation_prompt: str,
         time_window: str = "60 seconds",
+        monitoring_diff: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Validate deployment results after CML deployment.
@@ -625,6 +626,7 @@ class LLMService:
             splunk_results: Results from Splunk query
             validation_prompt: Template prompt for validation
             time_window: Time window of analysis
+            monitoring_diff: Before/after diff from monitoring stage
 
         Returns:
             Validation results as dictionary
@@ -632,12 +634,14 @@ class LLMService:
         # Demo mode: return realistic mock validation
         if self.demo_mode:
             logger.info("Demo mode: returning mock validation")
-            return self._generate_demo_analysis(config, splunk_results)
+            return self._generate_demo_validation(config, splunk_results, monitoring_diff)
 
         prompt = validation_prompt.replace("{{config}}", json.dumps(config, indent=2))
         prompt = prompt.replace("{{deployment_result}}", json.dumps(deployment_result, indent=2))
         prompt = prompt.replace("{{splunk_results}}", json.dumps(splunk_results, indent=2))
         prompt = prompt.replace("{{time_window}}", time_window)
+        if monitoring_diff:
+            prompt = prompt.replace("{{monitoring_diff}}", json.dumps(monitoring_diff, indent=2))
 
         system_prompt = """You are a network operations analyst validating deployment results.
         Analyze post-deployment monitoring data to confirm successful deployment.
@@ -658,6 +662,108 @@ class LLMService:
             if json_match:
                 return json.loads(json_match.group())
             raise ValueError(f"Failed to parse JSON from response: {response}")
+
+    def _generate_demo_validation(
+        self,
+        config: Dict[str, Any],
+        splunk_results: Dict[str, Any],
+        monitoring_diff: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Generate realistic demo validation results including diff analysis."""
+        explanation = config.get("explanation", "Configuration change")
+
+        # Analyze diff to determine status
+        diff_findings = []
+        if monitoring_diff:
+            ospf_change = monitoring_diff.get("ospf_neighbors", {}).get("change", 0)
+            interface_change = monitoring_diff.get("interfaces_up", {}).get("change", 0)
+            route_change = monitoring_diff.get("routes", {}).get("change", 0)
+
+            if ospf_change >= 0:
+                diff_findings.append({
+                    "category": "OSPF Neighbors",
+                    "status": "ok",
+                    "message": f"OSPF neighbor count stable ({ospf_change:+d} change)",
+                    "severity": "info"
+                })
+            else:
+                diff_findings.append({
+                    "category": "OSPF Neighbors",
+                    "status": "warning",
+                    "message": f"OSPF neighbor count decreased ({ospf_change:+d})",
+                    "severity": "warning"
+                })
+
+            if interface_change >= 0:
+                diff_findings.append({
+                    "category": "Interface Status",
+                    "status": "ok",
+                    "message": f"All interfaces stable ({interface_change:+d} change)",
+                    "severity": "info"
+                })
+            else:
+                diff_findings.append({
+                    "category": "Interface Status",
+                    "status": "warning",
+                    "message": f"Some interfaces went down ({interface_change:+d})",
+                    "severity": "warning"
+                })
+
+            if route_change >= 0:
+                diff_findings.append({
+                    "category": "OSPF Routes",
+                    "status": "ok",
+                    "message": f"Route count stable ({route_change:+d} change)",
+                    "severity": "info"
+                })
+            else:
+                diff_findings.append({
+                    "category": "OSPF Routes",
+                    "status": "warning",
+                    "message": f"Some routes lost ({route_change:+d})",
+                    "severity": "warning"
+                })
+
+        base_findings = [
+            {
+                "category": "OSPF Convergence",
+                "status": "ok",
+                "message": "OSPF neighbors re-established within expected timeframe",
+                "severity": "info"
+            },
+            {
+                "category": "CPU Utilization",
+                "status": "ok",
+                "message": "CPU utilization within normal range (12%)",
+                "severity": "info"
+            },
+        ]
+
+        all_findings = diff_findings + base_findings
+
+        # Determine validation status based on findings
+        has_warnings = any(f.get("status") == "warning" for f in all_findings)
+        validation_status = "WARNING" if has_warnings else "PASSED"
+        overall_score = 80 if has_warnings else 95
+
+        return {
+            "status": "healthy" if not has_warnings else "degraded",
+            "overall_score": overall_score,
+            "summary": f"Configuration change applied. {explanation}",
+            "validation_status": validation_status,
+            "findings": all_findings,
+            "metrics": {
+                "ospf_convergence_time_ms": 4850,
+                "neighbor_count": monitoring_diff.get("ospf_neighbors", {}).get("after", 3) if monitoring_diff else 3,
+                "routes_in_area": monitoring_diff.get("routes", {}).get("after", 12) if monitoring_diff else 12,
+                "cpu_utilization_percent": 12,
+                "memory_utilization_percent": 45
+            },
+            "deployment_verified": True,
+            "post_deployment_status": "Configuration applied and verified",
+            "recommendation": "Review warnings" if has_warnings else "No action required",
+            "recommendation_reason": "Some metrics changed during deployment" if has_warnings else "All health checks passed",
+        }
 
     async def generate_notification(
         self,

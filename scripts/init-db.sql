@@ -58,17 +58,19 @@ CREATE TYPE job_status AS ENUM ('pending', 'queued', 'running', 'paused', 'compl
 -- 3. config_generation - LLM generates Cisco IOS commands
 -- 4. ai_advice - LLM reviews proposed changes, provides risk assessment
 -- 5. human_decision - Approve/reject BEFORE deployment
--- 6. cml_deployment - Deploy to CML lab (only if approved)
--- 7. monitoring - Wait for convergence
--- 8. splunk_analysis - Collect post-deployment telemetry
--- 9. ai_validation - LLM validates deployment results
--- 10. notifications - Send alerts with final status
+-- 6. baseline_collection - Collect network state BEFORE deployment
+-- 7. cml_deployment - Deploy to CML lab (only if approved)
+-- 8. monitoring - Wait for convergence and collect post-state with diff
+-- 9. splunk_analysis - Collect post-deployment telemetry
+-- 10. ai_validation - LLM validates deployment results
+-- 11. notifications - Send alerts with final status
 CREATE TYPE pipeline_stage AS ENUM (
     'voice_input',
     'intent_parsing',
     'config_generation',
     'ai_advice',
     'human_decision',
+    'baseline_collection',
     'cml_deployment',
     'monitoring',
     'splunk_analysis',
@@ -90,6 +92,7 @@ CREATE TABLE IF NOT EXISTS pipeline_jobs (
         "config_generation": {"status": "pending", "data": null},
         "ai_advice": {"status": "pending", "data": null},
         "human_decision": {"status": "pending", "data": null},
+        "baseline_collection": {"status": "pending", "data": null},
         "cml_deployment": {"status": "pending", "data": null},
         "monitoring": {"status": "pending", "data": null},
         "splunk_analysis": {"status": "pending", "data": null},

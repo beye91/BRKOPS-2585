@@ -43,19 +43,21 @@ class PipelineStage(str, enum.Enum):
     1. VOICE_INPUT - Capture and transcribe voice command
     2. INTENT_PARSING - LLM extracts structured intent
     3. CONFIG_GENERATION - LLM generates Cisco IOS commands
-    4. AI_ADVICE - LLM reviews proposed changes, provides risk assessment (NEW)
-    5. HUMAN_DECISION - Approve/reject BEFORE deployment (MOVED)
-    6. CML_DEPLOYMENT - Deploy to CML lab (only if approved)
-    7. MONITORING - Wait for convergence
-    8. SPLUNK_ANALYSIS - Collect post-deployment telemetry
-    9. AI_VALIDATION - LLM validates deployment results (RENAMED from AI_ANALYSIS)
-    10. NOTIFICATIONS - Send alerts with final status
+    4. AI_ADVICE - LLM reviews proposed changes, provides risk assessment
+    5. HUMAN_DECISION - Approve/reject BEFORE deployment
+    6. BASELINE_COLLECTION - Collect current network state BEFORE deployment
+    7. CML_DEPLOYMENT - Deploy to CML lab (only if approved)
+    8. MONITORING - Wait for convergence and collect post-state with diff
+    9. SPLUNK_ANALYSIS - Collect post-deployment telemetry
+    10. AI_VALIDATION - LLM validates deployment results
+    11. NOTIFICATIONS - Send alerts with final status
     """
     VOICE_INPUT = "voice_input"
     INTENT_PARSING = "intent_parsing"
     CONFIG_GENERATION = "config_generation"
     AI_ADVICE = "ai_advice"
     HUMAN_DECISION = "human_decision"
+    BASELINE_COLLECTION = "baseline_collection"
     CML_DEPLOYMENT = "cml_deployment"
     MONITORING = "monitoring"
     SPLUNK_ANALYSIS = "splunk_analysis"
@@ -66,8 +68,8 @@ class PipelineStage(str, enum.Enum):
 # PostgreSQL ENUM types (must match database schema)
 pipeline_stage_enum = ENUM(
     'voice_input', 'intent_parsing', 'config_generation', 'ai_advice',
-    'human_decision', 'cml_deployment', 'monitoring', 'splunk_analysis',
-    'ai_validation', 'notifications',
+    'human_decision', 'baseline_collection', 'cml_deployment', 'monitoring',
+    'splunk_analysis', 'ai_validation', 'notifications',
     name='pipeline_stage', create_type=False
 )
 
