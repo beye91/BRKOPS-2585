@@ -21,7 +21,11 @@ from models.operations import (
     OperationResponse,
     OperationSummary,
     ApprovalRequest,
+    RollbackRequest,
+    RollbackResponse,
 )
+from db.models import MCPServer
+from services.cml_client import CMLClient
 from services.websocket_manager import manager
 
 logger = structlog.get_logger()
@@ -408,3 +412,198 @@ async def advance_operation(
         )
 
     return {"success": True, "message": "Operation advancing to next stage"}
+
+
+@router.post("/{operation_id}/rollback", response_model=RollbackResponse)
+async def rollback_operation(
+    operation_id: UUID,
+    rollback: RollbackRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Execute rollback of deployed configuration.
+
+    This endpoint applies the rollback commands generated during config_generation
+    to revert the CML device to its previous state.
+    """
+    from datetime import datetime
+
+    # Validate confirmation
+    if not rollback.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rollback requires confirmation (confirm=True)",
+        )
+
+    # Get the operation
+    result = await db.execute(select(PipelineJob).where(PipelineJob.id == operation_id))
+    job = result.scalar_one_or_none()
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Operation {operation_id} not found",
+        )
+
+    # Validate operation has completed deployment
+    cml_deployment = job.stages_data.get("cml_deployment", {})
+    if cml_deployment.get("status") != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Operation has not completed CML deployment stage",
+        )
+
+    if not cml_deployment.get("data", {}).get("deployed"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No successful deployment to rollback",
+        )
+
+    # Check if rollback already executed
+    if job.stages_data.get("rollback", {}).get("status") == "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rollback has already been executed for this operation",
+        )
+
+    # Get rollback commands from config_generation stage
+    config_gen = job.stages_data.get("config_generation", {})
+    rollback_commands = config_gen.get("data", {}).get("rollback_commands", [])
+
+    if not rollback_commands:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No rollback commands available for this operation",
+        )
+
+    # Get CML deployment info
+    lab_id = cml_deployment.get("data", {}).get("lab_id")
+    node_id = cml_deployment.get("data", {}).get("node_id")
+    device = cml_deployment.get("data", {}).get("device")
+
+    if not lab_id or not node_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing CML deployment information (lab_id or node_id)",
+        )
+
+    logger.info(
+        "Starting rollback",
+        job_id=str(operation_id),
+        device=device,
+        commands_count=len(rollback_commands),
+        reason=rollback.reason,
+    )
+
+    # Initialize rollback stage
+    job.stages_data["rollback"] = {
+        "status": "running",
+        "started_at": datetime.utcnow().isoformat(),
+        "data": {
+            "reason": rollback.reason,
+            "commands": rollback_commands,
+        },
+    }
+    await db.commit()
+
+    # Broadcast rollback started event
+    await manager.broadcast({
+        "type": "operation.rollback.started",
+        "job_id": str(operation_id),
+        "device": device,
+        "commands_count": len(rollback_commands),
+    })
+
+    try:
+        # Get CML server from database
+        cml_result = await db.execute(
+            select(MCPServer).where(MCPServer.type == "cml", MCPServer.is_active == True)
+        )
+        cml_server = cml_result.scalar_one_or_none()
+
+        if not cml_server:
+            raise Exception("No active CML server configured")
+
+        # Create CML client and apply rollback config
+        client = CMLClient(cml_server.endpoint, cml_server.auth_config)
+
+        # Join commands into config block
+        config_block = "\n".join(rollback_commands)
+        result = await client.apply_config(
+            lab_id=lab_id,
+            node_id=node_id,
+            config=config_block,
+            save=True,
+        )
+
+        # Update rollback stage with success
+        job.stages_data["rollback"] = {
+            "status": "completed",
+            "started_at": job.stages_data["rollback"]["started_at"],
+            "completed_at": datetime.utcnow().isoformat(),
+            "data": {
+                "reason": rollback.reason,
+                "commands": rollback_commands,
+                "commands_executed": len(rollback_commands),
+                "output": result.get("output", ""),
+                "success": True,
+            },
+        }
+        await db.commit()
+
+        logger.info(
+            "Rollback completed successfully",
+            job_id=str(operation_id),
+            device=device,
+        )
+
+        # Broadcast rollback completed event
+        await manager.broadcast({
+            "type": "operation.rollback.completed",
+            "job_id": str(operation_id),
+            "device": device,
+            "success": True,
+        })
+
+        return RollbackResponse(
+            success=True,
+            message=f"Rollback completed successfully on {device}",
+            commands_executed=len(rollback_commands),
+            rollback_output=result.get("output"),
+        )
+
+    except Exception as e:
+        error_message = str(e)
+        logger.error(
+            "Rollback failed",
+            job_id=str(operation_id),
+            device=device,
+            error=error_message,
+        )
+
+        # Update rollback stage with failure
+        job.stages_data["rollback"] = {
+            "status": "failed",
+            "started_at": job.stages_data["rollback"]["started_at"],
+            "completed_at": datetime.utcnow().isoformat(),
+            "data": {
+                "reason": rollback.reason,
+                "commands": rollback_commands,
+                "success": False,
+                "error": error_message,
+            },
+        }
+        await db.commit()
+
+        # Broadcast rollback failed event
+        await manager.broadcast({
+            "type": "operation.rollback.failed",
+            "job_id": str(operation_id),
+            "device": device,
+            "error": error_message,
+        })
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Rollback failed: {error_message}",
+        )

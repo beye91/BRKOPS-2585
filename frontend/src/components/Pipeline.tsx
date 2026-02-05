@@ -44,6 +44,8 @@ interface PipelineProps {
   stagesData: Record<string, StageData>;
   onAdvance?: () => void;
   isPaused?: boolean;
+  operationId?: string;
+  onRefresh?: () => void;
 }
 
 const stageIcons: Record<string, any> = {
@@ -60,7 +62,7 @@ const stageIcons: Record<string, any> = {
   notifications: Bell,
 };
 
-export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused }: PipelineProps) {
+export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused, operationId, onRefresh }: PipelineProps) {
   const currentIndex = stages.findIndex((s) => s.key === currentStage);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
 
@@ -248,6 +250,13 @@ export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused
             stage={selectedStageInfo}
             stageData={selectedStageData}
             onClose={() => setSelectedStage(null)}
+            operationId={operationId}
+            rollbackCommands={stagesData.config_generation?.data?.rollback_commands || []}
+            rollbackStatus={stagesData.rollback}
+            onRollbackComplete={() => {
+              onRefresh?.();
+              setSelectedStage(null);
+            }}
           />
         )}
       </AnimatePresence>

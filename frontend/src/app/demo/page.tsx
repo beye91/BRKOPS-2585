@@ -149,6 +149,22 @@ export default function DemoPage() {
     }
   };
 
+  const handleRefreshOperation = async () => {
+    const opToRefresh = viewingHistoryOp || currentOperation;
+    if (!opToRefresh) return;
+
+    try {
+      const response = await operationsApi.get(opToRefresh.id);
+      if (viewingHistoryOp) {
+        setViewingHistoryOp(response.data);
+      } else {
+        setCurrentOperation(response.data);
+      }
+    } catch (error: any) {
+      console.error('Failed to refresh operation:', error);
+    }
+  };
+
   const tabs = [
     { id: 'voice', label: 'Voice Input', icon: Mic },
     { id: 'topology', label: 'Topology', icon: Network },
@@ -265,6 +281,8 @@ export default function DemoPage() {
             stagesData={displayOperation?.stages || {}}
             onAdvance={isViewingHistory ? undefined : handleAdvance}
             isPaused={displayOperation?.status === 'paused'}
+            operationId={displayOperation?.id}
+            onRefresh={handleRefreshOperation}
           />
         </div>
 

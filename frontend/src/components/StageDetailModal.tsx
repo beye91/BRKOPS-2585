@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   X,
@@ -13,8 +14,10 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  RotateCcw,
 } from 'lucide-react';
 import { cn, calculateStageDuration, formatStageDuration, formatDate } from '@/lib/utils';
+import { operationsApi } from '@/services/api';
 
 interface Stage {
   key: string;
@@ -34,11 +37,53 @@ interface StageDetailModalProps {
   stage: Stage;
   stageData: StageData;
   onClose: () => void;
+  operationId?: string;
+  rollbackCommands?: string[];
+  rollbackStatus?: StageData;
+  onRollbackComplete?: () => void;
 }
 
-export function StageDetailModal({ stage, stageData, onClose }: StageDetailModalProps) {
+export function StageDetailModal({
+  stage,
+  stageData,
+  onClose,
+  operationId,
+  rollbackCommands = [],
+  rollbackStatus,
+  onRollbackComplete,
+}: StageDetailModalProps) {
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const [rollbackError, setRollbackError] = useState<string | null>(null);
+  const [showRollbackConfirm, setShowRollbackConfirm] = useState(false);
+
   const duration = calculateStageDuration(stageData);
   const status = stageData.status;
+
+  const handleRollback = async () => {
+    if (!operationId) return;
+
+    setIsRollingBack(true);
+    setRollbackError(null);
+
+    try {
+      await operationsApi.rollback(operationId);
+      setShowRollbackConfirm(false);
+      onRollbackComplete?.();
+    } catch (error: any) {
+      const message = error.response?.data?.detail || error.message || 'Rollback failed';
+      setRollbackError(message);
+    } finally {
+      setIsRollingBack(false);
+    }
+  };
+
+  const canRollback =
+    stage.key === 'cml_deployment' &&
+    stageData.status === 'completed' &&
+    stageData.data?.deployed &&
+    rollbackCommands.length > 0 &&
+    rollbackStatus?.status !== 'completed' &&
+    operationId;
 
   const getStatusIcon = () => {
     switch (status) {
@@ -313,6 +358,132 @@ export function StageDetailModal({ stage, stageData, onClose }: StageDetailModal
             {data.error && (
               <div className="bg-error/10 border border-error/20 p-3 rounded-lg">
                 <p className="text-sm text-error">{data.error}</p>
+              </div>
+            )}
+
+            {/* Rollback Section */}
+            {canRollback && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <h4 className="font-medium text-sm flex items-center gap-2 mb-3">
+                  <RotateCcw className="w-4 h-4" />
+                  Rollback Available
+                </h4>
+
+                {/* Show rollback commands */}
+                <div className="mb-3">
+                  <span className="text-xs text-text-muted">Rollback Commands</span>
+                  <pre className="mt-1 text-xs font-mono bg-background p-3 rounded-lg overflow-x-auto text-warning max-h-32 overflow-y-auto">
+                    {rollbackCommands.join('\n')}
+                  </pre>
+                </div>
+
+                {/* Rollback error */}
+                {rollbackError && (
+                  <div className="mb-3 p-3 bg-error/10 border border-error/20 rounded-lg">
+                    <p className="text-sm text-error">{rollbackError}</p>
+                  </div>
+                )}
+
+                {/* Confirmation dialog */}
+                {showRollbackConfirm ? (
+                  <div className="p-3 bg-warning/10 border border-warning/20 rounded-lg">
+                    <p className="text-sm text-warning mb-3">
+                      Are you sure you want to rollback this configuration? This will apply the rollback commands to {data.device}.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleRollback}
+                        disabled={isRollingBack}
+                        className="px-4 py-2 bg-warning text-white rounded hover:bg-warning/90 disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {isRollingBack ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Rolling back...
+                          </>
+                        ) : (
+                          <>
+                            <RotateCcw className="w-4 h-4" />
+                            Confirm Rollback
+                          </>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => setShowRollbackConfirm(false)}
+                        disabled={isRollingBack}
+                        className="px-4 py-2 bg-background border border-border rounded hover:bg-background-elevated disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowRollbackConfirm(true)}
+                    className="px-4 py-2 bg-warning/10 border border-warning/30 text-warning rounded hover:bg-warning/20 flex items-center gap-2"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Execute Rollback
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Rollback already executed */}
+            {rollbackStatus?.status === 'completed' && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <div className={cn(
+                  'p-3 rounded-lg border',
+                  rollbackStatus.data?.success ? 'bg-success/10 border-success/20' : 'bg-error/10 border-error/20'
+                )}>
+                  <div className="flex items-center gap-2 mb-1">
+                    {rollbackStatus.data?.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-success" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-error" />
+                    )}
+                    <span className="text-sm font-medium">
+                      {rollbackStatus.data?.success ? 'Rollback Completed' : 'Rollback Failed'}
+                    </span>
+                  </div>
+                  {rollbackStatus.data?.commands_executed && (
+                    <p className="text-xs text-text-muted">
+                      {rollbackStatus.data.commands_executed} commands executed
+                    </p>
+                  )}
+                  {rollbackStatus.completed_at && (
+                    <p className="text-xs text-text-muted mt-1">
+                      {formatDate(rollbackStatus.completed_at)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Rollback in progress (from another session) */}
+            {rollbackStatus?.status === 'running' && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <div className="p-3 rounded-lg border bg-primary/10 border-primary/20">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                    <span className="text-sm font-medium">Rollback in Progress</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Rollback failed */}
+            {rollbackStatus?.status === 'failed' && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <div className="p-3 rounded-lg border bg-error/10 border-error/20">
+                  <div className="flex items-center gap-2 mb-1">
+                    <XCircle className="w-4 h-4 text-error" />
+                    <span className="text-sm font-medium">Rollback Failed</span>
+                  </div>
+                  {rollbackStatus.data?.error && (
+                    <p className="text-xs text-error">{rollbackStatus.data.error}</p>
+                  )}
+                </div>
               </div>
             )}
           </div>

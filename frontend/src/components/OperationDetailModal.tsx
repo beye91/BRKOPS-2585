@@ -19,9 +19,10 @@ import { cn, formatDate, PIPELINE_STAGES } from '@/lib/utils';
 interface OperationDetailModalProps {
   operation: Operation;
   onClose: () => void;
+  onRefresh?: () => void;
 }
 
-export function OperationDetailModal({ operation, onClose }: OperationDetailModalProps) {
+export function OperationDetailModal({ operation, onClose, onRefresh }: OperationDetailModalProps) {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
@@ -173,6 +174,8 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
               currentStage={operation.current_stage || ''}
               stagesData={operation.stages || {}}
               isPaused={operation.status === 'paused'}
+              operationId={operation.id}
+              onRefresh={onRefresh}
             />
           </div>
 

@@ -28,6 +28,9 @@ export const operationsApi = {
 
   advance: (id: string) =>
     api.post(`/operations/${id}/advance`),
+
+  rollback: (id: string, reason?: string) =>
+    api.post(`/operations/${id}/rollback`, { confirm: true, reason }),
 };
 
 // Voice API

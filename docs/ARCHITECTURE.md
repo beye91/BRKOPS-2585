@@ -429,6 +429,7 @@ CREATE TABLE pipeline_jobs (
 |   |-- GET    /{id}            # Get operation status
 |   |-- POST   /{id}/approve    # Human approval
 |   |-- POST   /{id}/reject     # Human rejection
+|   |-- POST   /{id}/rollback   # Execute rollback of deployed config
 |   +-- DELETE /{id}            # Cancel operation
 |
 |-- /voice
@@ -473,21 +474,24 @@ CREATE TABLE pipeline_jobs (
 ws://api/events
 
 Events:
-|-- operation.started        # New operation began
-|-- operation.stage_changed  # Pipeline stage transition
-|-- operation.completed      # Operation finished
-|-- operation.error          # Error occurred
-|-- voice.transcript_update  # Live transcription
-|-- voice.intent_detected    # Intent parsed
-|-- config.generated         # Config ready
-|-- cml.deployment_started   # Pushing to CML
-|-- cml.deployment_complete  # CML config applied
-|-- splunk.query_started     # Splunk query running
-|-- splunk.results_ready     # Splunk results available
-|-- analysis.started         # AI analysis begun
-|-- analysis.complete        # Findings ready
-|-- notification.sent        # WebEx/ServiceNow sent
-+-- log.entry                # Real-time log entry
+|-- operation.started           # New operation began
+|-- operation.stage_changed     # Pipeline stage transition
+|-- operation.completed         # Operation finished
+|-- operation.error             # Error occurred
+|-- operation.rollback.started  # Rollback execution started
+|-- operation.rollback.completed # Rollback completed successfully
+|-- operation.rollback.failed   # Rollback execution failed
+|-- voice.transcript_update     # Live transcription
+|-- voice.intent_detected       # Intent parsed
+|-- config.generated            # Config ready
+|-- cml.deployment_started      # Pushing to CML
+|-- cml.deployment_complete     # CML config applied
+|-- splunk.query_started        # Splunk query running
+|-- splunk.results_ready        # Splunk results available
+|-- analysis.started            # AI analysis begun
+|-- analysis.complete           # Findings ready
+|-- notification.sent           # WebEx/ServiceNow sent
++-- log.entry                   # Real-time log entry
 ```
 
 ---

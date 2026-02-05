@@ -127,3 +127,27 @@ class AnalysisResult(BaseModel):
     recommendation: str
     requires_action: bool
     suggested_remediation: Optional[str] = None
+
+
+class RollbackRequest(BaseModel):
+    """Request to execute rollback on a deployed configuration."""
+
+    confirm: bool = Field(..., description="Must be True to execute rollback")
+    reason: Optional[str] = Field(None, description="Optional reason for rollback")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "confirm": True,
+                "reason": "Configuration caused network issues",
+            }
+        }
+
+
+class RollbackResponse(BaseModel):
+    """Response from rollback execution."""
+
+    success: bool
+    message: str
+    commands_executed: int
+    rollback_output: Optional[str] = None
