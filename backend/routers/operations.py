@@ -255,6 +255,7 @@ async def approve_operation(
 
     if approval.approved:
         # Continue pipeline with deployment stages
+        job.status = 'running'  # Update status so frontend knows approval was processed
         job.result = {
             "decision": "approved",
             "comment": approval.comment,

@@ -254,6 +254,24 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
                 try:
                     stage_result = await processor(ctx, job, use_case, db, demo_mode=demo_mode)
 
+                    # Check if stage result indicates failure
+                    stage_failed = False
+                    error_message = None
+                    if isinstance(stage_result, dict):
+                        # Check common failure indicators
+                        if stage_result.get("deployed") is False:
+                            stage_failed = True
+                            error_message = stage_result.get("error", "Deployment failed")
+                        elif stage_result.get("success") is False:
+                            stage_failed = True
+                            error_message = stage_result.get("error", "Stage failed")
+                        elif stage_result.get("error") and not stage_result.get("deployed") and not stage_result.get("success"):
+                            stage_failed = True
+                            error_message = stage_result.get("error")
+
+                    if stage_failed:
+                        raise Exception(error_message or f"Stage {stage.value} failed")
+
                     # Update stage data
                     job.stages_data[stage.value] = {
                         "status": "completed",
@@ -586,12 +604,50 @@ async def process_ai_validation(ctx: dict, job: PipelineJob, use_case: UseCase, 
     """Validate deployment results with AI (post-deployment analysis)."""
     logger.info("AI validation", job_id=str(job.id))
 
-    llm_service = LLMService(demo_mode=demo_mode)
-
     # Get data from previous stages
     config = job.stages_data.get("config_generation", {}).get("data", {})
     deployment_result = job.stages_data.get("cml_deployment", {}).get("data", {})
     splunk_results = job.stages_data.get("splunk_analysis", {}).get("data", {})
+
+    # Check if Splunk data collection failed
+    splunk_queried = splunk_results.get("queried", False)
+    splunk_error = splunk_results.get("error")
+
+    if not splunk_queried or splunk_error:
+        # Return warning when Splunk data is unavailable
+        logger.warning(
+            "AI validation without Splunk data",
+            job_id=str(job.id),
+            splunk_error=splunk_error,
+        )
+        return {
+            "validation_status": "WARNING",
+            "overall_score": 50,
+            "summary": "Cannot fully validate deployment - Splunk data unavailable",
+            "findings": [
+                {
+                    "category": "Data Collection",
+                    "status": "warning",
+                    "message": f"Splunk query failed: {splunk_error or 'No data returned'}",
+                    "severity": "warning"
+                },
+                {
+                    "category": "Deployment Status",
+                    "status": "ok" if deployment_result.get("deployed") else "error",
+                    "message": "Configuration was applied to device" if deployment_result.get("deployed") else "Deployment failed",
+                    "severity": "info" if deployment_result.get("deployed") else "error"
+                }
+            ],
+            "deployment_verified": False,
+            "recommendation": "Manual verification recommended - check Splunk connectivity and device logs",
+            "recommendation_reason": "Automated validation requires Splunk log data to verify deployment success",
+            "metrics": {
+                "splunk_events_analyzed": 0,
+                "data_collection_status": "failed"
+            }
+        }
+
+    llm_service = LLMService(demo_mode=demo_mode)
 
     # Get validation/analysis prompt
     validation_prompt = use_case.analysis_prompt if use_case else """
@@ -651,8 +707,8 @@ async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, 
         "job_id": str(job.id),
         "use_case": job.use_case_name,
         "severity": severity,
-        "findings": str(analysis.get("findings", [])),
-        "recommendation": analysis.get("recommendation", ""),
+        "findings": str(validation.get("findings", [])),
+        "recommendation": validation.get("recommendation", ""),
         **job.stages_data.get("intent_parsing", {}).get("data", {}),
         **job.stages_data.get("cml_deployment", {}).get("data", {}),
     }
@@ -679,7 +735,7 @@ async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, 
         if snow_template:
             result = await notification_service.create_servicenow_ticket(
                 short_description=snow_template.get("short_description", f"Network Alert - {job.use_case_name}"),
-                description=f"Analysis Results:\n{analysis}",
+                description=f"Analysis Results:\n{validation}",
                 category=snow_template.get("category", "Network"),
                 priority="2" if severity == "CRITICAL" else "3",
             )

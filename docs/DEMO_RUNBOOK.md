@@ -361,14 +361,35 @@ Switch to Admin Panel window and briefly show:
 
 ### 4.4 No Logs in Splunk
 
-**Symptom:** Log Stream stays empty
+**Symptom:** Log Stream stays empty, Splunk Analysis shows 0 events
 
 **Solution:**
 1. Check Splunk MCP server in Admin Panel
 2. Verify CML devices are sending syslog to Splunk
 3. Check Splunk index configuration
+4. **JWT Token Audience:** The Splunk JWT token must have `audience: "mcp"`. If you see HTTP 401 errors:
+   - Generate new token in Splunk with `audience: "mcp"`
+   - Update the token in Admin Panel > MCP Servers > Splunk Primary
 
-### 4.5 WebSocket Disconnected
+### 4.5 Approval Modal Not Closing
+
+**Symptom:** After clicking "Approve & Deploy", the modal stays open
+
+**Solution:**
+This was fixed in the backend. The job status now updates to `running` immediately on approval.
+If you see this issue, rebuild the backend:
+```bash
+docker compose build --no-cache backend && docker compose up -d backend
+```
+
+### 4.6 Status Shows "Rejected" After Approval
+
+**Symptom:** Operation shows rejected even after clicking Approve
+
+**Solution:**
+Same fix as 4.5. The backend now correctly updates the job status when approval is granted.
+
+### 4.7 WebSocket Disconnected
 
 **Symptom:** Real-time updates stop, UI shows stale data
 
