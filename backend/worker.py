@@ -23,9 +23,11 @@ from tasks.health import check_mcp_health
 
 
 async def startup(ctx: dict) -> None:
-    """Worker startup - initialize connections."""
+    """Worker startup - initialize connections and recover orphaned jobs."""
     import structlog
-    from db.database import init_db
+    from db.database import init_db, async_session
+    from sqlalchemy import select, update
+    from db.models import PipelineJob
 
     logger = structlog.get_logger()
     logger.info("arq worker starting up")
@@ -33,6 +35,23 @@ async def startup(ctx: dict) -> None:
     # Initialize database connection
     await init_db()
     logger.info("Worker database initialized")
+
+    # Recover orphaned jobs that were running when the worker died
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(PipelineJob).where(PipelineJob.status == 'running')
+            )
+            orphaned = result.scalars().all()
+            if orphaned:
+                for job in orphaned:
+                    job.status = 'failed'
+                    job.result = {"error": "Job interrupted by worker restart", "recoverable": True}
+                    logger.warning("Marking orphaned job as failed", job_id=str(job.id), stage=job.current_stage)
+                await db.commit()
+                logger.info("Recovered orphaned jobs", count=len(orphaned))
+    except Exception as e:
+        logger.error("Failed to recover orphaned jobs", error=str(e))
 
 
 async def shutdown(ctx: dict) -> None:
