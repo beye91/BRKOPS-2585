@@ -90,6 +90,8 @@ class ConfigChangeResult:
     commands: List[str] = field(default_factory=list)
     rollback_commands: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    affected_interfaces: List[Dict] = field(default_factory=list)
+    ospf_process_id: Optional[int] = None
 
 
 # =============================================================================
@@ -418,6 +420,8 @@ def build_ospf_area_change(
         result.warnings.append("No OSPF process found in running config")
         return result
 
+    result.ospf_process_id = ospf_process_id
+
     # Detect config style and build commands
     uses_network_statements = ospf and len(ospf.network_statements) > 0
     uses_interface_level = any(
@@ -448,6 +452,20 @@ def build_ospf_area_change(
                 )
                 continue
 
+            # Map this network statement to affected interfaces
+            for iface_name, iface in parsed.interfaces.items():
+                if iface.ip_address and _ip_in_network(iface.ip_address, stmt.network, stmt.wildcard):
+                    result.affected_interfaces.append({
+                        "name": iface_name,
+                        "ip_address": iface.ip_address,
+                        "subnet_mask": iface.subnet_mask,
+                        "description": iface.description,
+                        "network_statement": f"{stmt.network} {stmt.wildcard}",
+                        "current_area": stmt.area,
+                        "new_area": new_area,
+                        "ospf_network_type": iface.ospf_network_type,
+                    })
+
             # Remove old, add new
             result.commands.append(f" no network {stmt.network} {stmt.wildcard} area {stmt.area}")
             result.commands.append(f" network {stmt.network} {stmt.wildcard} area {new_area}")
@@ -472,6 +490,15 @@ def build_ospf_area_change(
                 continue
 
             old_area = iface.ospf_area
+            result.affected_interfaces.append({
+                "name": iface_name,
+                "ip_address": iface.ip_address,
+                "subnet_mask": iface.subnet_mask,
+                "description": iface.description,
+                "current_area": old_area,
+                "new_area": new_area,
+                "ospf_network_type": iface.ospf_network_type,
+            })
             result.commands.append(f"interface {iface_name}")
             result.commands.append(f" ip ospf {iface.ospf_process_id} area {new_area}")
             result.rollback_commands.append(f"interface {iface_name}")

@@ -772,6 +772,8 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
                 "commands": change.commands,
                 "rollback_commands": change.rollback_commands,
                 "warnings": change.warnings,
+                "affected_interfaces": change.affected_interfaces,
+                "ospf_process_id": change.ospf_process_id,
                 "running_config_snapshot": raw_config[:5000],
                 "hostname": parsed.hostname,
             }

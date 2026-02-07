@@ -191,6 +191,26 @@ export function StageDetailModal({
                         {cfg.commands?.length || 0} commands
                       </span>
                     </h5>
+                    {/* Affected interfaces */}
+                    {cfg.affected_interfaces?.length > 0 && (
+                      <div className="mb-2">
+                        <span className="text-xs text-text-muted">Affected Interfaces</span>
+                        <div className="mt-1 space-y-1">
+                          {cfg.affected_interfaces.map((iface: any, i: number) => (
+                            <div key={i} className="flex items-center gap-2 text-xs bg-background p-1.5 rounded">
+                              <span className="font-mono font-medium text-primary">{iface.name}</span>
+                              <span className="text-text-muted">{iface.ip_address}/{iface.subnet_mask}</span>
+                              {iface.description && (
+                                <span className="text-text-muted italic">{iface.description}</span>
+                              )}
+                              <span className="ml-auto text-warning">
+                                area {iface.current_area} → {iface.new_area}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {cfg.commands?.length > 0 && (
                       <pre className="text-xs font-mono bg-background p-2 rounded overflow-x-auto text-primary max-h-32 overflow-y-auto">
                         {cfg.commands?.join('\n')}
@@ -216,6 +236,31 @@ export function StageDetailModal({
               </div>
             ) : (
               <>
+                {/* Show affected interfaces for single-device view */}
+                {(() => {
+                  const singleCfg = perDeviceEntries.length === 1 ? perDeviceEntries[0][1] : null;
+                  const interfaces = singleCfg?.affected_interfaces || [];
+                  if (interfaces.length === 0) return null;
+                  return (
+                    <div className="mb-3">
+                      <h4 className="font-medium text-sm text-text-secondary">Affected Interfaces</h4>
+                      <div className="mt-1 space-y-1">
+                        {interfaces.map((iface: any, i: number) => (
+                          <div key={i} className="flex items-center gap-2 text-xs bg-background p-2 rounded">
+                            <span className="font-mono font-medium text-primary">{iface.name}</span>
+                            <span className="text-text-muted">{iface.ip_address}/{iface.subnet_mask}</span>
+                            {iface.description && (
+                              <span className="text-text-muted italic">{iface.description}</span>
+                            )}
+                            <span className="ml-auto text-warning">
+                              area {iface.current_area} → {iface.new_area}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <h4 className="font-medium text-sm text-text-secondary">Generated Commands</h4>
                 <pre className="text-xs font-mono bg-background p-3 rounded-lg overflow-x-auto text-primary">
                   {data.commands?.join('\n')}
