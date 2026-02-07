@@ -73,6 +73,8 @@ class UseCaseCreate(BaseModel):
     servicenow_enabled: bool = Field(False, description="Enable ServiceNow ticket creation")
     allowed_actions: List[str] = Field(default=[], description="Allowed action types for scope validation")
     scope_validation_enabled: bool = Field(True, description="Enable scope validation")
+    llm_provider: Optional[str] = Field(None, description="LLM provider override (openai, anthropic, or null for global default)")
+    llm_model: Optional[str] = Field(None, description="LLM model override (e.g., gpt-4-turbo-preview, claude-3-sonnet-20240229)")
     is_active: bool = Field(True, description="Whether use case is active")
     sort_order: int = Field(0, description="Display sort order")
 
@@ -107,6 +109,8 @@ class UseCaseUpdate(BaseModel):
     servicenow_enabled: Optional[bool] = None
     allowed_actions: Optional[List[str]] = None
     scope_validation_enabled: Optional[bool] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
 
@@ -129,6 +133,8 @@ class UseCaseResponse(BaseModel):
     servicenow_enabled: bool = False
     allowed_actions: List[str] = []
     scope_validation_enabled: bool = True
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
     is_active: bool
     sort_order: int
     created_at: datetime

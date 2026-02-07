@@ -82,6 +82,8 @@ INSERT INTO use_cases (
     servicenow_enabled,
     allowed_actions,
     scope_validation_enabled,
+    llm_provider,
+    llm_model,
     is_active,
     sort_order
 ) VALUES (
@@ -177,6 +179,8 @@ Provide analysis in JSON format:
     true,
     ARRAY['ospf', 'routing', 'modify_ospf_area', 'change_area', 'add_network', 'remove_network'],
     true,
+    NULL,
+    NULL,
     true,
     1
 ) ON CONFLICT (name) DO UPDATE SET
@@ -200,6 +204,8 @@ INSERT INTO use_cases (
     servicenow_enabled,
     allowed_actions,
     scope_validation_enabled,
+    llm_provider,
+    llm_model,
     is_active,
     sort_order
 ) VALUES (
@@ -285,6 +291,8 @@ Respond in JSON format:
     true,
     ARRAY['credential', 'password', 'rotate', 'username', 'authentication'],
     true,
+    NULL,
+    NULL,
     true,
     2
 ) ON CONFLICT (name) DO UPDATE SET
@@ -305,6 +313,8 @@ INSERT INTO use_cases (
     servicenow_enabled,
     allowed_actions,
     scope_validation_enabled,
+    llm_provider,
+    llm_model,
     is_active,
     sort_order
 ) VALUES (
@@ -390,6 +400,8 @@ Respond in JSON format:
     true,
     ARRAY['security', 'advisory', 'cve', 'vulnerability', 'patch', 'remediation'],
     true,
+    NULL,
+    NULL,
     true,
     3
 ) ON CONFLICT (name) DO UPDATE SET
@@ -410,11 +422,11 @@ INSERT INTO mcp_servers (name, type, endpoint, auth_config, is_active) VALUES
 (
     'Splunk Primary',
     'splunk',
-    'http://splunk-mcp-server:8080',
-    '{"host": "", "token": ""}',
-    false
+    'https://198.18.133.50:8089/services/mcp',
+    '{"host": "198.18.133.50", "token": ""}',
+    true
 )
-ON CONFLICT DO NOTHING;
+ON CONFLICT (name, type) DO NOTHING;
 
 -- =============================================================================
 -- Log successful seeding

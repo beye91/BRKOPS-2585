@@ -226,14 +226,43 @@ function MCPServersTab({ showToast }: { showToast: (msg: string, type: 'success'
     },
   });
 
+  const [testingServerId, setTestingServerId] = useState<number | null>(null);
+  const [deletingServerId, setDeletingServerId] = useState<number | null>(null);
+
   const testMutation = useMutation({
-    mutationFn: (id: number) => mcpApi.testServer(id),
-    onSuccess: () => {
+    mutationFn: (id: number) => {
+      setTestingServerId(id);
+      return mcpApi.testServer(id);
+    },
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['mcp-servers'] });
-      showToast('Connection test successful', 'success');
+      const data = response.data;
+      if (data.success) {
+        showToast(`Connection test successful (${data.tools_count} tools found)`, 'success');
+      } else {
+        showToast(data.message || 'Connection test failed', 'error');
+      }
+      setTestingServerId(null);
     },
     onError: (error: any) => {
       showToast(error.response?.data?.detail || 'Connection test failed', 'error');
+      setTestingServerId(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => {
+      setDeletingServerId(id);
+      return mcpApi.deleteServer(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mcp-servers'] });
+      showToast('MCP Server deleted successfully', 'success');
+      setDeletingServerId(null);
+    },
+    onError: (error: any) => {
+      showToast(error.response?.data?.detail || 'Failed to delete server', 'error');
+      setDeletingServerId(null);
     },
   });
 
@@ -332,10 +361,10 @@ function MCPServersTab({ showToast }: { showToast: (msg: string, type: 'success'
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => testMutation.mutate(server.id)}
-                    disabled={testMutation.isPending}
+                    disabled={testingServerId === server.id}
                     className="flex items-center gap-2 px-3 py-1.5 bg-background border border-border rounded-lg text-sm hover:border-primary"
                   >
-                    {testMutation.isPending ? (
+                    {testingServerId === server.id ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <TestTube className="w-4 h-4" />
@@ -347,6 +376,21 @@ function MCPServersTab({ showToast }: { showToast: (msg: string, type: 'success'
                     className="p-2 hover:bg-background rounded-lg"
                   >
                     <Edit2 className="w-4 h-4 text-text-secondary" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm(`Are you sure you want to delete "${server.name}"?`)) {
+                        deleteMutation.mutate(server.id);
+                      }
+                    }}
+                    disabled={deletingServerId === server.id}
+                    className="p-2 hover:bg-background rounded-lg"
+                  >
+                    {deletingServerId === server.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-error" />
+                    ) : (
+                      <Trash2 className="w-4 h-4 text-error" />
+                    )}
                   </button>
                 </div>
               </div>
@@ -838,7 +882,7 @@ function UseCasesTab({ showToast }: { showToast: (msg: string, type: 'success' |
                 </div>
               </div>
               <p className="text-sm text-text-secondary mb-3">{uc.description}</p>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 mb-2">
                 {uc.trigger_keywords?.map((keyword: string) => (
                   <span
                     key={keyword}
@@ -847,6 +891,14 @@ function UseCasesTab({ showToast }: { showToast: (msg: string, type: 'success' |
                     {keyword}
                   </span>
                 ))}
+              </div>
+              <div className="flex items-center gap-2 text-xs text-text-muted">
+                <Brain className="w-3 h-3" />
+                <span>
+                  LLM: {uc.llm_provider
+                    ? `${uc.llm_provider.charAt(0).toUpperCase() + uc.llm_provider.slice(1)}${uc.llm_model ? ` (${uc.llm_model})` : ''}`
+                    : 'Global Default'}
+                </span>
               </div>
             </div>
           ))}
@@ -880,6 +932,32 @@ function UseCaseModal({
   showToast: (msg: string, type: 'success' | 'error') => void;
 }) {
   const queryClient = useQueryClient();
+  const LLM_PROVIDERS = [
+    { value: '', label: 'Global Default' },
+    { value: 'openai', label: 'OpenAI' },
+    { value: 'anthropic', label: 'Anthropic' },
+  ];
+
+  const LLM_MODELS: Record<string, { value: string; label: string }[]> = {
+    '': [{ value: '', label: 'Global Default' }],
+    openai: [
+      { value: '', label: 'Default (from config)' },
+      { value: 'gpt-4-turbo-preview', label: 'GPT-4 Turbo' },
+      { value: 'gpt-4o', label: 'GPT-4o' },
+      { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+      { value: 'gpt-4', label: 'GPT-4' },
+      { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
+    ],
+    anthropic: [
+      { value: '', label: 'Default (from config)' },
+      { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+      { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
+      { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+      { value: 'claude-3-sonnet-20240229', label: 'Claude 3 Sonnet' },
+      { value: 'claude-3-haiku-20240307', label: 'Claude 3 Haiku' },
+    ],
+  };
+
   const [formData, setFormData] = useState({
     name: '',
     display_name: '',
@@ -889,6 +967,8 @@ function UseCaseModal({
     config_prompt: '',
     analysis_prompt: '',
     convergence_wait_seconds: 45,
+    llm_provider: '',
+    llm_model: '',
     is_active: true,
   });
 
@@ -903,6 +983,8 @@ function UseCaseModal({
         config_prompt: useCase.config_prompt || '',
         analysis_prompt: useCase.analysis_prompt || '',
         convergence_wait_seconds: useCase.convergence_wait_seconds || 45,
+        llm_provider: useCase.llm_provider || '',
+        llm_model: useCase.llm_model || '',
         is_active: useCase.is_active ?? true,
       });
     } else {
@@ -915,6 +997,8 @@ function UseCaseModal({
         config_prompt: '',
         analysis_prompt: '',
         convergence_wait_seconds: 45,
+        llm_provider: '',
+        llm_model: '',
         is_active: true,
       });
     }
@@ -949,6 +1033,8 @@ function UseCaseModal({
     const data = {
       ...formData,
       trigger_keywords: formData.trigger_keywords.split(',').map((k) => k.trim()).filter(Boolean),
+      llm_provider: formData.llm_provider || null,
+      llm_model: formData.llm_model || null,
     };
     if (useCase) {
       updateMutation.mutate(data);
@@ -1057,6 +1143,51 @@ function UseCaseModal({
             className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary font-mono text-sm"
             required
           />
+        </div>
+
+        {/* LLM Provider/Model Selection */}
+        <div className="border-t border-border pt-4">
+          <h4 className="text-sm font-semibold text-text-secondary mb-3 uppercase tracking-wider flex items-center gap-2">
+            <Brain className="w-4 h-4" />
+            LLM Configuration
+          </h4>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                LLM Provider
+              </label>
+              <select
+                value={formData.llm_provider}
+                onChange={(e) => setFormData({ ...formData, llm_provider: e.target.value, llm_model: '' })}
+                className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary"
+              >
+                {LLM_PROVIDERS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-text-muted mt-1">
+                Leave as "Global Default" to use the system-wide LLM setting
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Model
+              </label>
+              <select
+                value={formData.llm_model}
+                onChange={(e) => setFormData({ ...formData, llm_model: e.target.value })}
+                className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary"
+                disabled={!formData.llm_provider}
+              >
+                {(LLM_MODELS[formData.llm_provider] || LLM_MODELS['']).map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-text-muted mt-1">
+                {formData.llm_provider ? 'Select a specific model or use provider default' : 'Select a provider first'}
+              </p>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">

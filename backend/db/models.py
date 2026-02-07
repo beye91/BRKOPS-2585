@@ -197,6 +197,8 @@ class UseCase(Base):
     servicenow_enabled = Column(Boolean, default=False)
     allowed_actions = Column(ARRAY(Text), default=[])
     scope_validation_enabled = Column(Boolean, default=True)
+    llm_provider = Column(String(50), nullable=True)  # 'openai', 'anthropic', or NULL for global default
+    llm_model = Column(String(100), nullable=True)  # specific model name, or NULL for global default
     is_active = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

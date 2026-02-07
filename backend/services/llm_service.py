@@ -21,8 +21,10 @@ class LLMService:
     Supports demo_mode for mock responses without real API calls.
     """
 
-    def __init__(self, demo_mode: bool = False):
+    def __init__(self, demo_mode: bool = False, provider: str = None, model: str = None):
         self.demo_mode = demo_mode
+        self.provider_override = provider  # 'openai' or 'anthropic' (None = use default)
+        self.model_override = model  # specific model name (None = use default)
         self.openai_client = None
         self.anthropic_client = None
         if not demo_mode:
@@ -70,7 +72,34 @@ class LLMService:
         temperature = temperature or settings.llm_temperature
         max_tokens = max_tokens or settings.llm_max_tokens
 
-        # Try primary provider first
+        # If provider override is set, use that provider directly
+        if self.provider_override == "anthropic" and self.anthropic_client:
+            try:
+                return await self._complete_anthropic(
+                    prompt, system_prompt, temperature, max_tokens
+                )
+            except Exception as e:
+                logger.warning("Anthropic (override) failed, trying OpenAI fallback", error=str(e))
+                if self.openai_client:
+                    return await self._complete_openai(
+                        prompt, system_prompt, temperature, max_tokens, json_response
+                    )
+                raise
+
+        if self.provider_override == "openai" and self.openai_client:
+            try:
+                return await self._complete_openai(
+                    prompt, system_prompt, temperature, max_tokens, json_response
+                )
+            except Exception as e:
+                logger.warning("OpenAI (override) failed, trying Anthropic fallback", error=str(e))
+                if self.anthropic_client:
+                    return await self._complete_anthropic(
+                        prompt, system_prompt, temperature, max_tokens
+                    )
+                raise
+
+        # Default behavior: try primary (OpenAI) then fallback (Anthropic)
         try:
             if self.openai_client:
                 return await self._complete_openai(
@@ -108,8 +137,9 @@ class LLMService:
 
         messages.append({"role": "user", "content": prompt})
 
+        model = self.model_override if (self.model_override and self.provider_override == "openai") else settings.openai_model
         kwargs = {
-            "model": settings.openai_model,
+            "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -131,8 +161,9 @@ class LLMService:
         max_tokens: int,
     ) -> str:
         """Generate completion using Anthropic Claude."""
+        model = self.model_override if (self.model_override and self.provider_override == "anthropic") else settings.anthropic_model
         kwargs = {
-            "model": settings.anthropic_model,
+            "model": model,
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": prompt}],
         }

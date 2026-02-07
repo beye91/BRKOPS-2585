@@ -44,8 +44,9 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_mcp_servers_type ON mcp_servers(type);
-CREATE INDEX idx_mcp_servers_active ON mcp_servers(is_active);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name_type ON mcp_servers(name, type);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_type ON mcp_servers(type);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_active ON mcp_servers(is_active);
 
 -- =============================================================================
 -- Pipeline Jobs
@@ -133,6 +134,8 @@ CREATE TABLE IF NOT EXISTS use_cases (
     cml_target_lab VARCHAR(100),
     splunk_index VARCHAR(100) DEFAULT 'netops',
     convergence_wait_seconds INTEGER DEFAULT 45,
+    llm_provider VARCHAR(50) DEFAULT NULL CHECK (llm_provider IS NULL OR llm_provider IN ('openai', 'anthropic')),
+    llm_model VARCHAR(100) DEFAULT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     sort_order INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),

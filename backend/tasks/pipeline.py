@@ -520,7 +520,11 @@ async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase,
     """Parse intent from transcript using LLM."""
     logger.info("Parsing intent", job_id=str(job.id))
 
-    llm_service = LLMService(demo_mode=demo_mode)
+    llm_service = LLMService(
+        demo_mode=demo_mode,
+        provider=getattr(use_case, 'llm_provider', None) if use_case else None,
+        model=getattr(use_case, 'llm_model', None) if use_case else None,
+    )
 
     # Get intent prompt from use case or default
     intent_prompt = use_case.intent_prompt if use_case else """
@@ -539,7 +543,7 @@ async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase,
 
     # Validate intent scope if use case is provided
     if use_case:
-        from backend.services.intent_validator import validate_intent_scope
+        from services.intent_validator import validate_intent_scope
         is_valid, error_msg = validate_intent_scope(intent, use_case)
 
         if not is_valid:
@@ -560,7 +564,11 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
     """Generate configuration from intent."""
     logger.info("Generating config", job_id=str(job.id))
 
-    llm_service = LLMService(demo_mode=demo_mode)
+    llm_service = LLMService(
+        demo_mode=demo_mode,
+        provider=getattr(use_case, 'llm_provider', None) if use_case else None,
+        model=getattr(use_case, 'llm_model', None) if use_case else None,
+    )
 
     # Get previous stage data
     intent = job.stages_data.get("intent_parsing", {}).get("data", {})
@@ -588,7 +596,11 @@ async def process_ai_advice(ctx: dict, job: PipelineJob, use_case: UseCase, db, 
     """Generate AI advice and risk assessment before human decision."""
     logger.info("Generating AI advice", job_id=str(job.id))
 
-    llm_service = LLMService(demo_mode=demo_mode)
+    llm_service = LLMService(
+        demo_mode=demo_mode,
+        provider=getattr(use_case, 'llm_provider', None) if use_case else None,
+        model=getattr(use_case, 'llm_model', None) if use_case else None,
+    )
 
     # Get data from previous stages
     intent = job.stages_data.get("intent_parsing", {}).get("data", {})
@@ -950,7 +962,11 @@ async def process_ai_validation(ctx: dict, job: PipelineJob, use_case: UseCase, 
             }
         }
 
-    llm_service = LLMService(demo_mode=demo_mode)
+    llm_service = LLMService(
+        demo_mode=demo_mode,
+        provider=getattr(use_case, 'llm_provider', None) if use_case else None,
+        model=getattr(use_case, 'llm_model', None) if use_case else None,
+    )
 
     # Get validation/analysis prompt
     validation_prompt = use_case.analysis_prompt if use_case else """
