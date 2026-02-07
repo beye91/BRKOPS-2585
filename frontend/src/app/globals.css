@@ -126,3 +126,48 @@ pre, code {
   0% { filter: drop-shadow(0 0 5px var(--primary)); }
   100% { filter: drop-shadow(0 0 15px var(--primary)); }
 }
+
+/* Critical error glow effect */
+.glow-critical {
+  box-shadow: 0 0 30px rgba(255, 71, 87, 0.6);
+  animation: pulse-critical 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-critical {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(255, 71, 87, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(255, 71, 87, 0.8);
+  }
+}
+
+/* Shake animation for failed stages */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+.shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+/* Error badge styling */
+.error-badge {
+  background: var(--error);
+  color: white;
+  border-radius: 50%;
+  font-weight: bold;
+  box-shadow: 0 0 10px rgba(255, 71, 87, 0.5);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* Large error text for critical messages */
+.error-text-large {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--error);
+  text-shadow: 0 0 10px rgba(255, 71, 87, 0.3);
+}

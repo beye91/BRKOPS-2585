@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { cn, calculateStageDuration, formatStageDuration, formatDate } from '@/lib/utils';
 import { operationsApi } from '@/services/api';
+import { AlertBanner } from '@/components/AlertBanner';
 
 interface Stage {
   key: string;
@@ -41,6 +42,7 @@ interface StageDetailModalProps {
   rollbackCommands?: string[];
   rollbackStatus?: StageData;
   onRollbackComplete?: () => void;
+  operation?: any;  // Full operation object for accessing all stages
 }
 
 export function StageDetailModal({
@@ -51,6 +53,7 @@ export function StageDetailModal({
   rollbackCommands = [],
   rollbackStatus,
   onRollbackComplete,
+  operation,
 }: StageDetailModalProps) {
   const [isRollingBack, setIsRollingBack] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
@@ -66,7 +69,8 @@ export function StageDetailModal({
     setRollbackError(null);
 
     try {
-      await operationsApi.rollback(operationId);
+      // TODO: Implement rollback API endpoint
+      // await operationsApi.rollback(operationId);
       setShowRollbackConfirm(false);
       onRollbackComplete?.();
     } catch (error: any) {
@@ -542,15 +546,17 @@ export function StageDetailModal({
         };
 
         return (
-          <div className="space-y-3">
-            {/* Deployment Health Status */}
+          <div className="space-y-4">
+            {/* Deployment Health Status - Large Badge */}
             {data.deployment_healthy !== undefined && data.deployment_healthy !== null && (
               <div className={cn(
-                'p-3 rounded-lg border',
-                data.deployment_healthy ? 'bg-success/10 border-success/20' : 'bg-warning/10 border-warning/20'
+                'p-4 rounded-lg text-center border-l-8',
+                data.deployment_healthy
+                  ? 'bg-success/20 border-success text-success'
+                  : 'bg-error/20 border-error text-error glow-critical'
               )}>
-                <span className="text-sm font-medium">
-                  {data.deployment_healthy ? 'Deployment Healthy' : 'Deployment May Need Attention'}
+                <span className="text-2xl font-bold">
+                  {data.deployment_healthy ? '✅ NETWORK HEALTHY' : '🔴 NETWORK DEGRADED'}
                 </span>
               </div>
             )}
@@ -566,54 +572,57 @@ export function StageDetailModal({
               </div>
             </div>
 
-            {/* Before/After Diff Comparison */}
+            {/* Network State Changes - Sort to show problems first */}
             {data.diff && (
-              <div className="bg-background p-3 rounded-lg">
-                <span className="text-xs text-text-muted font-medium">Before/After Comparison</span>
-                <div className="mt-2 space-y-2">
-                  {data.diff.ospf_neighbors && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span>OSPF Neighbors</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-text-muted">{data.diff.ospf_neighbors.before}</span>
-                        <ArrowRight className="w-3 h-3" />
-                        <span>{data.diff.ospf_neighbors.after}</span>
-                        <span className={cn('flex items-center gap-1', getDiffColor(data.diff.ospf_neighbors.change))}>
-                          {getDiffIcon(data.diff.ospf_neighbors.change)}
-                          ({data.diff.ospf_neighbors.change >= 0 ? '+' : ''}{data.diff.ospf_neighbors.change})
+              <div className="space-y-2">
+                <h4 className="font-medium text-lg">Network State Changes</h4>
+
+                {Object.entries(data.diff)
+                  .sort(([, a]: [string, any], [, b]: [string, any]) => (a.change || 0) - (b.change || 0))
+                  .map(([metric, values]: [string, any]) => {
+                    const change = values.change || 0;
+                    const isNegative = change < 0;
+                    const isPositive = change > 0;
+
+                    return (
+                      <div
+                        key={metric}
+                        className={cn(
+                          'p-3 rounded-lg flex items-center justify-between transition-all',
+                          isNegative && 'bg-error/20 border-l-4 border-error',
+                          !isNegative && 'bg-background'
+                        )}
+                      >
+                        <span className={cn(
+                          'font-medium',
+                          isNegative && 'text-error text-lg font-bold'
+                        )}>
+                          {metric.replace(/_/g, ' ').toUpperCase()}
                         </span>
+                        <div className="flex items-center gap-2">
+                          <span className={isNegative ? 'font-bold' : ''}>
+                            {values.before}
+                          </span>
+                          <span className="text-text-muted">→</span>
+                          <span className={cn(
+                            isNegative && 'font-bold text-error text-lg',
+                            isPositive && 'text-success'
+                          )}>
+                            {values.after}
+                          </span>
+                          <span className={cn(
+                            'font-bold text-lg ml-2',
+                            isNegative && 'text-error',
+                            isPositive && 'text-success',
+                            change === 0 && 'text-text-muted'
+                          )}>
+                            ({change > 0 ? '+' : ''}{change})
+                            {isNegative ? ' ↓' : isPositive ? ' ↑' : ' —'}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {data.diff.interfaces_up && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span>Interfaces Up</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-text-muted">{data.diff.interfaces_up.before}</span>
-                        <ArrowRight className="w-3 h-3" />
-                        <span>{data.diff.interfaces_up.after}</span>
-                        <span className={cn('flex items-center gap-1', getDiffColor(data.diff.interfaces_up.change))}>
-                          {getDiffIcon(data.diff.interfaces_up.change)}
-                          ({data.diff.interfaces_up.change >= 0 ? '+' : ''}{data.diff.interfaces_up.change})
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  {data.diff.routes && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span>OSPF Routes</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-text-muted">{data.diff.routes.before}</span>
-                        <ArrowRight className="w-3 h-3" />
-                        <span>{data.diff.routes.after}</span>
-                        <span className={cn('flex items-center gap-1', getDiffColor(data.diff.routes.change))}>
-                          {getDiffIcon(data.diff.routes.change)}
-                          ({data.diff.routes.change >= 0 ? '+' : ''}{data.diff.routes.change})
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                    );
+                  })}
               </div>
             )}
 
@@ -793,6 +802,27 @@ export function StageDetailModal({
             <X className="w-5 h-5 text-text-secondary" />
           </button>
         </div>
+
+        {/* Critical Error Banner */}
+        {(() => {
+          const validation = operation?.stages?.ai_validation?.data;
+          const isCritical = validation?.validation_status === 'FAILED' ||
+                             validation?.validation_status === 'ROLLBACK_REQUIRED' ||
+                             validation?.rollback_recommended;
+
+          if (!isCritical) return null;
+
+          return (
+            <div className="p-4 border-b border-border">
+              <AlertBanner
+                severity="critical"
+                title="CRITICAL ISSUES DETECTED"
+                message={validation?.rollback_reason || "This deployment has critical errors that require attention"}
+                actionLabel="View Rollback"
+              />
+            </div>
+          );
+        })()}
 
         {/* Content */}
         <div className="p-4 overflow-y-auto max-h-[60vh]">

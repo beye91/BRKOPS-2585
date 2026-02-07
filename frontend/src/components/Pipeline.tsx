@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { cn, calculateStageDuration, formatStageDuration, getDurationColor } from '@/lib/utils';
 import { StageDetailModal } from './StageDetailModal';
+import { AlertBanner } from './AlertBanner';
 
 interface Stage {
   key: string;
@@ -83,6 +84,24 @@ export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused
   return (
     <>
       <div className="bg-background-elevated rounded-xl border border-border p-6">
+        {/* Error Alert Banner */}
+        {(() => {
+          const failedStage = stages.find(s => stagesData[s.key]?.status === 'failed');
+          if (!failedStage) return null;
+
+          return (
+            <div className="mb-4">
+              <AlertBanner
+                severity="critical"
+                title={`PIPELINE FAILED - ${failedStage.name}`}
+                message="Click the stage circle for error details"
+                onAction={() => handleStageClick(failedStage.key)}
+                actionLabel="View Error"
+              />
+            </div>
+          );
+        })()}
+
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Pipeline Progress</h2>
           <div className="flex items-center gap-3">
@@ -138,16 +157,16 @@ export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused
                   {/* Stage Circle */}
                   <motion.div
                     className={cn(
-                      'relative w-10 h-10 rounded-full flex items-center justify-center z-10 transition-all',
-                      status === 'completed' && 'bg-success',
-                      status === 'running' && 'bg-primary',
-                      status === 'failed' && 'bg-error',
-                      status === 'pending' && 'bg-background-elevated border-2 border-border',
+                      'relative rounded-full flex items-center justify-center z-10 transition-all',
+                      status === 'failed' && 'w-14 h-14 bg-error glow-critical shake',  // Larger + animated for failed
+                      status === 'completed' && 'w-10 h-10 bg-success',
+                      status === 'running' && 'w-10 h-10 bg-primary',
+                      status === 'pending' && 'w-10 h-10 bg-background-elevated border-2 border-border',
                       isClickable && 'cursor-pointer hover:ring-2 hover:ring-primary hover:ring-offset-2 hover:ring-offset-background-elevated'
                     )}
                     initial={{ scale: 1 }}
-                    animate={isActive ? { scale: [1, 1.1, 1] } : { scale: 1 }}
-                    transition={{ repeat: isActive ? Infinity : 0, duration: 1.5 }}
+                    animate={status === 'failed' ? { scale: [1, 1.1, 1] } : isActive ? { scale: [1, 1.1, 1] } : { scale: 1 }}
+                    transition={{ repeat: status === 'failed' || isActive ? Infinity : 0, duration: 1.5 }}
                     onClick={() => handleStageClick(stage.key)}
                     whileHover={isClickable ? { scale: 1.1 } : {}}
                     whileTap={isClickable ? { scale: 0.95 } : {}}
