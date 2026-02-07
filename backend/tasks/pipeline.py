@@ -1045,14 +1045,47 @@ async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, 
     template = use_case.notification_template if use_case else {}
 
     # Build context
+    # Format findings as human-readable bullet list
+    raw_findings = validation.get("findings", [])
+    if raw_findings and isinstance(raw_findings, list):
+        issues_text = "\n".join(
+            f"- [{f.get('category', f.get('type', 'General'))}] {f.get('message', f.get('description', 'Unknown issue'))}"
+            for f in raw_findings
+            if isinstance(f, dict)
+        )
+    else:
+        issues_text = "No specific issues identified"
+
+    # Determine rollback guidance
+    rollback_recommended = validation.get("rollback_recommended", False)
+    if rollback_recommended or validation_status in ("FAILED", "ROLLBACK_REQUIRED"):
+        rollback_action = "Rollback is recommended. Use the BRKOPS-2585 platform to initiate automatic rollback or contact the network team."
+    else:
+        rollback_action = ""
+
+    # Derive 'devices' from target_devices (list from intent) or device (string from cml)
+    intent_data = job.stages_data.get("intent_parsing", {}).get("data", {})
+    cml_data = job.stages_data.get("cml_deployment", {}).get("data", {})
+    target_devices = intent_data.get("target_devices", [])
+    if isinstance(target_devices, list) and target_devices:
+        devices_str = ", ".join(target_devices)
+    elif cml_data.get("device"):
+        devices_str = cml_data["device"]
+    else:
+        devices_str = "unknown device"
+
     context = {
         "job_id": str(job.id),
         "use_case": job.use_case_name,
         "severity": severity,
-        "findings": str(validation.get("findings", [])),
-        "recommendation": validation.get("recommendation", ""),
-        **job.stages_data.get("intent_parsing", {}).get("data", {}),
-        **job.stages_data.get("cml_deployment", {}).get("data", {}),
+        "issues": issues_text,
+        "findings": str(raw_findings),
+        "recommendation": validation.get("recommendation", "Review deployment status manually"),
+        "rollback_action": rollback_action,
+        "summary": validation.get("summary", ""),
+        **intent_data,
+        **cml_data,
+        "devices": devices_str,
     }
 
     results = []
@@ -1109,6 +1142,8 @@ async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, 
                 "success": result.get("success"),
                 "reason": ticket_reason,
                 "enabled": servicenow_enabled,
+                "ticket_number": result.get("response", {}).get("number", ""),
+                "ticket_link": result.get("response", {}).get("link", ""),
             })
 
     return {

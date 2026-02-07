@@ -69,8 +69,7 @@ export function StageDetailModal({
     setRollbackError(null);
 
     try {
-      // TODO: Implement rollback API endpoint
-      // await operationsApi.rollback(operationId);
+      await operationsApi.rollback(operationId, 'Manual rollback from stage detail');
       setShowRollbackConfirm(false);
       onRollbackComplete?.();
     } catch (error: any) {
@@ -754,6 +753,11 @@ export function StageDetailModal({
                       <XCircle className="w-4 h-4 text-error" />
                     )}
                     <span className="capitalize">{result.channel}</span>
+                    {result.ticket_number && (
+                      <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded font-mono">
+                        {result.ticket_number}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

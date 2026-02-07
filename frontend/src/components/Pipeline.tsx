@@ -24,6 +24,7 @@ import {
 import { cn, calculateStageDuration, formatStageDuration, getDurationColor } from '@/lib/utils';
 import { StageDetailModal } from './StageDetailModal';
 import { AlertBanner } from './AlertBanner';
+import { operationsApi } from '@/services/api';
 
 interface Stage {
   key: string;
@@ -66,6 +67,20 @@ const stageIcons: Record<string, any> = {
 export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused, operationId, onRefresh }: PipelineProps) {
   const currentIndex = stages.findIndex((s) => s.key === currentStage);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
+  const [isRollingBack, setIsRollingBack] = useState(false);
+
+  const handleRollbackClick = async () => {
+    if (!operationId || isRollingBack) return;
+    setIsRollingBack(true);
+    try {
+      await operationsApi.rollback(operationId, 'AI validation detected critical issues');
+      onRefresh?.();
+    } catch (err) {
+      console.error('Rollback failed:', err);
+    } finally {
+      setIsRollingBack(false);
+    }
+  };
 
   const handleStageClick = (stageKey: string) => {
     const stageData = stagesData[stageKey];
@@ -102,8 +117,35 @@ export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused
           );
         })()}
 
+        {/* Rollback Required Banner */}
+        {(() => {
+          const validation = stagesData.ai_validation?.data;
+          const notificationResults = stagesData.notifications?.data?.results;
+          const snowTicket = notificationResults?.find((r: any) => r.channel === 'servicenow' && r.ticket_number);
+          const isRollbackRequired = validation?.rollback_recommended ||
+            validation?.validation_status === 'FAILED' ||
+            validation?.validation_status === 'ROLLBACK_REQUIRED';
+
+          if (!isRollbackRequired || !stagesData.ai_validation?.status) return null;
+
+          return (
+            <div className="mb-4">
+              <AlertBanner
+                severity="critical"
+                title="ROLLBACK REQUIRED"
+                message={`AI validation detected critical issues.${snowTicket ? ` ServiceNow: ${snowTicket.ticket_number}` : ''}`}
+                onAction={handleRollbackClick}
+                actionLabel={isRollingBack ? 'Rolling back...' : 'Initiate Rollback'}
+              />
+            </div>
+          );
+        })()}
+
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Pipeline Progress</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold">Pipeline Progress</h2>
+            <img src="/cisco_live_logo.png" alt="Cisco Live" className="h-6" />
+          </div>
           <div className="flex items-center gap-3">
             {isAwaitingApproval && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-warning/20 text-warning rounded-lg text-sm animate-pulse">
