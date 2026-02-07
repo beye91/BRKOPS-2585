@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -43,7 +43,7 @@ export default function DemoPage() {
   const [showDetailModal, setShowDetailModal] = useState(false);
 
   const { currentOperation, setCurrentOperation, updateStage, setLoading, setError } = useOperationsStore();
-  const { messages, connected } = useWebSocketStore();
+  const { messages, connected, subscribe } = useWebSocketStore();
 
   // Determine which operation to display (live or history)
   const displayOperation = viewingHistoryOp || currentOperation;
@@ -80,30 +80,53 @@ export default function DemoPage() {
     fetchActiveOperation();
   }, [setCurrentOperation]);
 
-  // Process WebSocket messages
+  // Track processed WebSocket message index
+  const lastProcessedIndex = useRef(0);
+
+  // Process WebSocket messages - handle ALL new messages since last processed
   useEffect(() => {
     if (messages.length === 0) return;
+    if (lastProcessedIndex.current >= messages.length) return;
 
-    const lastMessage = messages[messages.length - 1];
+    const newMessages = messages.slice(lastProcessedIndex.current);
+    lastProcessedIndex.current = messages.length;
 
-    if (lastMessage.job_id && currentOperation?.id === lastMessage.job_id) {
-      switch (lastMessage.type) {
-        case 'operation.stage_changed':
-          updateStage(lastMessage.stage!, {
-            status: lastMessage.status!,
-            data: lastMessage.data,
-          });
-          break;
-        case 'operation.completed':
-        case 'operation.error':
-          // Refresh operation state
-          operationsApi.get(lastMessage.job_id).then((res) => {
-            setCurrentOperation(res.data);
-          });
-          break;
+    for (const msg of newMessages) {
+      if (msg.job_id && currentOperation?.id === msg.job_id) {
+        switch (msg.type) {
+          case 'operation.stage_changed':
+            updateStage(msg.stage!, {
+              status: msg.status!,
+              data: msg.data,
+            });
+            break;
+          case 'operation.completed':
+          case 'operation.error':
+            operationsApi.get(msg.job_id).then((res) => {
+              setCurrentOperation(res.data);
+            });
+            break;
+        }
       }
     }
   }, [messages, currentOperation?.id, updateStage, setCurrentOperation]);
+
+  // Polling fallback: refresh operation state every 3s while running
+  useEffect(() => {
+    if (!currentOperation?.id) return;
+    if (currentOperation.status !== 'running' && currentOperation.status !== 'paused') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await operationsApi.get(currentOperation.id);
+        setCurrentOperation(res.data);
+      } catch (err) {
+        console.error('Poll refresh failed:', err);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [currentOperation?.id, currentOperation?.status, setCurrentOperation]);
 
   const handleStartOperation = async () => {
     if (!transcript.trim()) return;
@@ -119,6 +142,10 @@ export default function DemoPage() {
       });
 
       setCurrentOperation(response.data);
+      // Subscribe to WebSocket updates for this operation
+      if (response.data?.id) {
+        subscribe(response.data.id);
+      }
     } catch (error: any) {
       setError(error.response?.data?.detail || 'Failed to start operation');
     } finally {

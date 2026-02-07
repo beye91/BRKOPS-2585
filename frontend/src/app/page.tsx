@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Mic,
@@ -13,15 +13,25 @@ import {
   CheckCircle2,
   AlertTriangle,
   XCircle,
-  ChevronRight
+  ChevronRight,
+  Github,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useOperationsStore } from '@/store/operations';
 import { useWebSocketStore } from '@/store/websocket';
+import { operationsApi } from '@/services/api';
 
 export default function HomePage() {
-  const { currentOperation, recentOperations } = useOperationsStore();
   const { connected } = useWebSocketStore();
+  const [recentOperations, setRecentOperations] = useState<any[]>([]);
+  const [opsLoading, setOpsLoading] = useState(true);
+
+  useEffect(() => {
+    operationsApi.list({ limit: 5 })
+      .then((res) => setRecentOperations(res.data || []))
+      .catch((err) => console.error('Failed to fetch recent operations:', err))
+      .finally(() => setOpsLoading(false));
+  }, []);
 
   return (
     <div className="min-h-screen bg-background relative">
@@ -83,12 +93,12 @@ export default function HomePage() {
         </motion.div>
 
         {/* Quick Actions */}
-        <div className="flex justify-center mb-12">
+        <div className="flex flex-wrap gap-6 justify-center items-stretch mb-12">
           <Link href="/demo">
             <motion.div
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="p-6 rounded-xl bg-background-elevated border border-border hover:border-primary transition-all cursor-pointer group"
+              className="p-6 rounded-xl bg-background-elevated border border-border hover:border-primary transition-all cursor-pointer group h-full"
             >
               <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center mb-4 group-hover:bg-primary/30 transition-colors">
                 <Play className="w-6 h-6 text-primary" />
@@ -102,6 +112,43 @@ export default function HomePage() {
               </div>
             </motion.div>
           </Link>
+
+          {/* QR Code */}
+          <motion.div
+            whileHover={{ scale: 1.02 }}
+            className="p-6 rounded-xl bg-background-elevated border border-border transition-all flex flex-col items-center justify-center"
+          >
+            <img
+              src="/qr-code.png"
+              alt="QR Code"
+              className="w-32 h-32 rounded-lg mb-3"
+            />
+            <p className="text-text-secondary text-sm text-center">Scan to follow along</p>
+          </motion.div>
+
+          {/* GitHub */}
+          <a
+            href="https://github.com/beye91/BRKOPS-2585"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <motion.div
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="p-6 rounded-xl bg-background-elevated border border-border hover:border-primary transition-all cursor-pointer group h-full flex flex-col items-center justify-center"
+            >
+              <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center mb-4 group-hover:bg-primary/30 transition-colors">
+                <Github className="w-6 h-6 text-primary" />
+              </div>
+              <h3 className="text-lg font-semibold mb-2">View Source</h3>
+              <p className="text-text-secondary text-sm text-center">
+                Browse the project on GitHub
+              </p>
+              <div className="flex items-center gap-1 mt-4 text-primary text-sm">
+                GitHub <ChevronRight className="w-4 h-4" />
+              </div>
+            </motion.div>
+          </a>
         </div>
 
         {/* Pipeline Overview */}
@@ -132,7 +179,12 @@ export default function HomePage() {
         {/* Recent Operations */}
         <div>
           <h3 className="text-xl font-semibold mb-6">Recent Operations</h3>
-          {recentOperations.length === 0 ? (
+          {opsLoading ? (
+            <div className="text-center py-12 bg-background-elevated rounded-xl border border-border">
+              <Loader2 className="w-8 h-8 text-primary mx-auto mb-4 animate-spin" />
+              <p className="text-text-secondary">Loading operations...</p>
+            </div>
+          ) : recentOperations.length === 0 ? (
             <div className="text-center py-12 bg-background-elevated rounded-xl border border-border">
               <Activity className="w-12 h-12 text-text-muted mx-auto mb-4" />
               <p className="text-text-secondary">No recent operations</p>
@@ -140,7 +192,7 @@ export default function HomePage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {recentOperations.map((op) => (
+              {recentOperations.map((op: any) => (
                 <div
                   key={op.id}
                   className="p-4 bg-background-elevated rounded-lg border border-border flex items-center justify-between"
@@ -149,14 +201,14 @@ export default function HomePage() {
                     {op.status === 'completed' && <CheckCircle2 className="w-5 h-5 text-success" />}
                     {op.status === 'running' && <Activity className="w-5 h-5 text-primary animate-pulse" />}
                     {op.status === 'failed' && <XCircle className="w-5 h-5 text-error" />}
-                    {op.status === 'pending' && <AlertTriangle className="w-5 h-5 text-warning" />}
+                    {(op.status === 'pending' || op.status === 'paused') && <AlertTriangle className="w-5 h-5 text-warning" />}
                     <div>
-                      <p className="font-medium">{op.use_case_name}</p>
+                      <p className="font-medium">{op.use_case_name || op.use_case}</p>
                       <p className="text-sm text-text-secondary truncate max-w-md">{op.input_text}</p>
                     </div>
                   </div>
                   <div className="text-sm text-text-muted">
-                    {op.current_stage}
+                    {op.current_stage?.replace(/_/g, ' ')}
                   </div>
                 </div>
               ))}
@@ -166,7 +218,7 @@ export default function HomePage() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border mt-12 py-6 relative z-10">
+      <footer className="border-t border-border mt-12 py-6 relative z-10 bg-background-elevated/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 text-center text-text-muted text-sm">
           BRKOPS-2585 | Cisco Live Demo Platform | Powered by CML & Splunk MCP Servers
         </div>
