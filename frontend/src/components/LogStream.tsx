@@ -18,9 +18,11 @@ interface LogEntry {
 
 interface LogStreamProps {
   logs: LogEntry[];
+  operationStatus?: string;
+  operationStage?: string;
 }
 
-export function LogStream({ logs }: LogStreamProps) {
+export function LogStream({ logs, operationStatus, operationStage }: LogStreamProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState('');
   const [levelFilter, setLevelFilter] = useState<string>('all');
@@ -136,8 +138,27 @@ export function LogStream({ logs }: LogStreamProps) {
         {filteredLogs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-text-muted">
             <Info className="w-12 h-12 mb-4" />
-            <p>No log entries found</p>
-            <p className="text-sm mt-1">Logs will appear after Splunk analysis</p>
+            {!operationStatus ? (
+              <>
+                <p>Run a demo operation to collect network logs</p>
+                <p className="text-sm mt-1">Splunk log data will stream here during the pipeline</p>
+              </>
+            ) : operationStatus === 'running' && operationStage && !['splunk_analysis', 'ai_validation', 'ai_advice', 'notification', 'human_decision', 'apply_config'].includes(operationStage) ? (
+              <>
+                <p>Waiting for Splunk analysis stage</p>
+                <p className="text-sm mt-1">Logs will appear when the pipeline reaches the Splunk query step</p>
+              </>
+            ) : operationStatus === 'completed' || operationStage === 'splunk_analysis' ? (
+              <>
+                <p>Splunk query returned no log entries</p>
+                <p className="text-sm mt-1">The query completed but no matching results were found</p>
+              </>
+            ) : (
+              <>
+                <p>No log entries found</p>
+                <p className="text-sm mt-1">Logs will appear after Splunk analysis</p>
+              </>
+            )}
           </div>
         ) : (
           <div

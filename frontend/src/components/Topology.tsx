@@ -61,6 +61,27 @@ const nodeTypes = {
   device: DeviceNode,
 };
 
+// Resolve a readable label for a CML lab
+function getLabLabel(lab: any): string {
+  const title = lab.title || lab.lab_title;
+  const nodeCount = lab.node_count ?? lab.nodes?.length;
+
+  let label: string;
+  if (title && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(title)) {
+    // Title exists and doesn't look like a UUID
+    label = title;
+  } else if (lab.id && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(lab.id)) {
+    label = lab.id;
+  } else {
+    label = `Lab ${(lab.id || '').substring(0, 8)}`;
+  }
+
+  if (nodeCount != null) {
+    label += ` (${nodeCount} node${nodeCount !== 1 ? 's' : ''})`;
+  }
+  return label;
+}
+
 export function Topology({ affectedDevices = [] }: TopologyProps) {
   const [selectedLab, setSelectedLab] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -163,7 +184,7 @@ export function Topology({ affectedDevices = [] }: TopologyProps) {
             >
               {labsData.labs.map((lab: any) => (
                 <option key={lab.id} value={lab.id}>
-                  {lab.title || lab.id}
+                  {getLabLabel(lab)}
                 </option>
               ))}
             </select>

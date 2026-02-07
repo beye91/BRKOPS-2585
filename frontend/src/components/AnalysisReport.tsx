@@ -38,17 +38,37 @@ interface Config {
 interface AnalysisReportProps {
   analysis?: Analysis;
   config?: Config;
+  operationStatus?: string;
+  operationStage?: string;
 }
 
-export function AnalysisReport({ analysis, config }: AnalysisReportProps) {
+export function AnalysisReport({ analysis, config, operationStatus, operationStage }: AnalysisReportProps) {
   if (!analysis && !config) {
     return (
       <div className="bg-background-elevated rounded-xl border border-border p-8 text-center">
         <FileText className="w-12 h-12 text-text-muted mx-auto mb-4" />
-        <p className="text-text-secondary">Analysis report will appear here</p>
-        <p className="text-sm text-text-muted mt-1">
-          After AI analyzes the Splunk results
-        </p>
+        {!operationStatus ? (
+          <>
+            <p className="text-text-secondary">Start an operation to see AI analysis</p>
+            <p className="text-sm text-text-muted mt-1">
+              The AI will analyze Splunk data and generate recommendations
+            </p>
+          </>
+        ) : operationStatus === 'running' && operationStage && !['ai_validation', 'ai_advice', 'notification', 'human_decision', 'apply_config'].includes(operationStage) ? (
+          <>
+            <p className="text-text-secondary">AI analysis will run after Splunk data collection</p>
+            <p className="text-sm text-text-muted mt-1">
+              Currently at: {operationStage.replace(/_/g, ' ')}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-text-secondary">No analysis data available for this operation</p>
+            <p className="text-sm text-text-muted mt-1">
+              The AI validation stage did not produce results
+            </p>
+          </>
+        )}
       </div>
     );
   }

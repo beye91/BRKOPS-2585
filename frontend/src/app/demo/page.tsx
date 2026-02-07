@@ -353,6 +353,8 @@ export default function DemoPage() {
                 >
                   <LogStream
                     logs={displayOperation?.stages?.splunk_analysis?.data?.results || []}
+                    operationStatus={displayOperation?.status}
+                    operationStage={displayOperation?.current_stage}
                   />
                 </motion.div>
               )}
@@ -367,6 +369,8 @@ export default function DemoPage() {
                   <AnalysisReport
                     analysis={displayOperation?.stages?.ai_validation?.data}
                     config={displayOperation?.stages?.config_generation?.data}
+                    operationStatus={displayOperation?.status}
+                    operationStage={displayOperation?.current_stage}
                   />
                 </motion.div>
               )}

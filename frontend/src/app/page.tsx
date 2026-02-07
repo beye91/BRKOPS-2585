@@ -24,9 +24,16 @@ export default function HomePage() {
   const { connected } = useWebSocketStore();
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative">
+      {/* Background Image */}
+      <div
+        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/bg.jpg)' }}
+      />
+      <div className="fixed inset-0 z-0 bg-[#0A0E14]/80" />
+
       {/* Header */}
-      <header className="border-b border-border bg-background-elevated/50 backdrop-blur-sm sticky top-0 z-50">
+      <header className="border-b border-border bg-background-elevated/50 backdrop-blur-sm sticky top-0 z-50 relative">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
@@ -56,7 +63,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="max-w-7xl mx-auto px-4 py-8 relative z-10">
         {/* Hero Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -76,7 +83,7 @@ export default function HomePage() {
         </motion.div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+        <div className="flex justify-center mb-12">
           <Link href="/demo">
             <motion.div
               whileHover={{ scale: 1.02 }}
@@ -92,44 +99,6 @@ export default function HomePage() {
               </p>
               <div className="flex items-center gap-1 mt-4 text-primary text-sm">
                 Launch Demo <ChevronRight className="w-4 h-4" />
-              </div>
-            </motion.div>
-          </Link>
-
-          <Link href="/demo?tab=topology">
-            <motion.div
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="p-6 rounded-xl bg-background-elevated border border-border hover:border-primary transition-all cursor-pointer group"
-            >
-              <div className="w-12 h-12 rounded-lg bg-success/20 flex items-center justify-center mb-4 group-hover:bg-success/30 transition-colors">
-                <Network className="w-6 h-6 text-success" />
-              </div>
-              <h3 className="text-lg font-semibold mb-2">View Topology</h3>
-              <p className="text-text-secondary text-sm">
-                Interactive network topology from CML
-              </p>
-              <div className="flex items-center gap-1 mt-4 text-success text-sm">
-                View Network <ChevronRight className="w-4 h-4" />
-              </div>
-            </motion.div>
-          </Link>
-
-          <Link href="/admin">
-            <motion.div
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="p-6 rounded-xl bg-background-elevated border border-border hover:border-primary transition-all cursor-pointer group"
-            >
-              <div className="w-12 h-12 rounded-lg bg-warning/20 flex items-center justify-center mb-4 group-hover:bg-warning/30 transition-colors">
-                <Settings className="w-6 h-6 text-warning" />
-              </div>
-              <h3 className="text-lg font-semibold mb-2">Admin Panel</h3>
-              <p className="text-text-secondary text-sm">
-                Configure MCP servers, use cases, and settings
-              </p>
-              <div className="flex items-center gap-1 mt-4 text-warning text-sm">
-                Open Settings <ChevronRight className="w-4 h-4" />
               </div>
             </motion.div>
           </Link>
@@ -197,7 +166,7 @@ export default function HomePage() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border mt-12 py-6">
+      <footer className="border-t border-border mt-12 py-6 relative z-10">
         <div className="max-w-7xl mx-auto px-4 text-center text-text-muted text-sm">
           BRKOPS-2585 | Cisco Live Demo Platform | Powered by CML & Splunk MCP Servers
         </div>

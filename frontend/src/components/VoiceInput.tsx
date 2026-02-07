@@ -133,86 +133,103 @@ export function VoiceInput({
 
   return (
     <div className="bg-background-elevated rounded-xl border border-border p-6">
-      <h2 className="text-lg font-semibold mb-6">Voice Command Input</h2>
+      <h2 className="text-lg font-semibold mb-6">
+        {micAvailable === false ? 'Command Input' : 'Voice Command Input'}
+      </h2>
 
-      {/* Microphone unavailable warning */}
-      {micAvailable === false && (
-        <div className="mb-6 p-4 bg-warning/10 border border-warning/30 rounded-lg flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm text-warning font-medium">Voice recording unavailable</p>
-            <p className="text-sm text-text-secondary mt-1">
-              Microphone requires HTTPS. Please type your command below or click an example.
-            </p>
+      {/* Mic UI - only shown when mic is available */}
+      {micAvailable !== false && (
+        <>
+          {/* Recording Button */}
+          <div className="flex justify-center mb-8">
+            <motion.button
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isTranscribing || isLoading}
+              className={cn(
+                'relative w-32 h-32 rounded-full flex items-center justify-center transition-all',
+                isRecording
+                  ? 'bg-error shadow-glow-error'
+                  : 'bg-primary shadow-glow-primary hover:bg-primary-hover',
+                (isTranscribing || isLoading) && 'opacity-50 cursor-not-allowed'
+              )}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              {isRecording ? (
+                <MicOff className="w-12 h-12 text-white" />
+              ) : (
+                <Mic className="w-12 h-12 text-white" />
+              )}
+
+              {/* Audio level ring */}
+              {isRecording && (
+                <motion.div
+                  className="absolute inset-0 rounded-full border-4 border-error"
+                  animate={{
+                    scale: 1 + audioLevel * 0.3,
+                    opacity: 1 - audioLevel * 0.5,
+                  }}
+                />
+              )}
+
+              {/* Transcribing indicator */}
+              {isTranscribing && (
+                <div className="absolute inset-0 rounded-full flex items-center justify-center bg-primary/80">
+                  <Loader2 className="w-12 h-12 text-white animate-spin" />
+                </div>
+              )}
+            </motion.button>
           </div>
-        </div>
+
+          {/* Instructions */}
+          <p className="text-center text-text-secondary mb-6">
+            {isRecording
+              ? 'Recording... Click to stop'
+              : isTranscribing
+              ? 'Transcribing audio...'
+              : 'Click to start recording your voice command'}
+          </p>
+        </>
       )}
 
-      {/* Recording Button */}
-      <div className="flex justify-center mb-8">
-        <motion.button
-          onClick={isRecording ? stopRecording : startRecording}
-          disabled={isTranscribing || isLoading || micAvailable === false}
-          className={cn(
-            'relative w-32 h-32 rounded-full flex items-center justify-center transition-all',
-            isRecording
-              ? 'bg-error shadow-glow-error'
-              : micAvailable === false
-              ? 'bg-gray-600 cursor-not-allowed'
-              : 'bg-primary shadow-glow-primary hover:bg-primary-hover',
-            (isTranscribing || isLoading) && 'opacity-50 cursor-not-allowed'
-          )}
-          whileHover={micAvailable !== false ? { scale: 1.05 } : {}}
-          whileTap={micAvailable !== false ? { scale: 0.95 } : {}}
-        >
-          {isRecording ? (
-            <MicOff className="w-12 h-12 text-white" />
-          ) : (
-            <Mic className={cn("w-12 h-12", micAvailable === false ? "text-gray-400" : "text-white")} />
-          )}
-
-          {/* Audio level ring */}
-          {isRecording && (
-            <motion.div
-              className="absolute inset-0 rounded-full border-4 border-error"
-              animate={{
-                scale: 1 + audioLevel * 0.3,
-                opacity: 1 - audioLevel * 0.5,
-              }}
-            />
-          )}
-
-          {/* Transcribing indicator */}
-          {isTranscribing && (
-            <div className="absolute inset-0 rounded-full flex items-center justify-center bg-primary/80">
-              <Loader2 className="w-12 h-12 text-white animate-spin" />
-            </div>
-          )}
-        </motion.button>
-      </div>
-
-      {/* Instructions */}
-      <p className="text-center text-text-secondary mb-6">
-        {micAvailable === false
-          ? 'Type your command below or select an example'
-          : isRecording
-          ? 'Recording... Click to stop'
-          : isTranscribing
-          ? 'Transcribing audio...'
-          : 'Click to start recording your voice command'}
-      </p>
+      {/* Text input description when mic is unavailable */}
+      {micAvailable === false && (
+        <p className="text-text-secondary mb-4">
+          Enter your network operation command below, or select an example to get started.
+        </p>
+      )}
 
       {/* Transcript Input */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-text-secondary mb-2">
-          Voice Command Transcript
+          {micAvailable === false ? 'Network Command' : 'Voice Command Transcript'}
         </label>
         <textarea
           value={transcript}
           onChange={(e) => setTranscript(e.target.value)}
-          placeholder="Your voice command will appear here, or type directly..."
+          placeholder={micAvailable === false
+            ? "Type your network operation command..."
+            : "Your voice command will appear here, or type directly..."}
           className="w-full h-32 px-4 py-3 bg-background border border-border rounded-lg resize-none focus:outline-none focus:border-primary"
         />
+      </div>
+
+      {/* Example Commands */}
+      <div className="mb-6">
+        <p className="text-sm text-text-muted mb-3">
+          {micAvailable === false ? 'Example commands:' : 'Or try an example:'}
+        </p>
+        <div className="space-y-2">
+          {exampleCommands.map((cmd, index) => (
+            <button
+              key={index}
+              onClick={() => setTranscript(cmd)}
+              className="w-full text-left px-4 py-2 bg-background rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-background-hover transition-colors"
+            >
+              &ldquo;{cmd}&rdquo;
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Start Button */}
@@ -238,22 +255,6 @@ export function VoiceInput({
           </>
         )}
       </button>
-
-      {/* Example Commands */}
-      <div className="mt-6">
-        <p className="text-sm text-text-muted mb-3">Or try an example:</p>
-        <div className="space-y-2">
-          {exampleCommands.map((cmd, index) => (
-            <button
-              key={index}
-              onClick={() => setTranscript(cmd)}
-              className="w-full text-left px-4 py-2 bg-background rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-background-hover transition-colors"
-            >
-              "{cmd}"
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
