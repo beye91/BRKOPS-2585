@@ -215,11 +215,11 @@ class Notification(Base):
 
     id = Column(Integer, primary_key=True)
     job_id = Column(UUID(as_uuid=True), ForeignKey("pipeline_jobs.id", ondelete="SET NULL"))
-    channel = Column(String(50), nullable=False)
+    channel = Column(ENUM('webex', 'servicenow', 'email', 'slack', name='notification_channel', create_type=False), nullable=False)
     recipient = Column(Text, nullable=False)
     subject = Column(Text)
     message = Column(Text, nullable=False)
-    status = Column(String(50), nullable=False, default='pending')
+    status = Column(ENUM('pending', 'sent', 'delivered', 'failed', name='notification_status', create_type=False), nullable=False, default='pending')
     response_data = Column(JSONB)
     error_message = Column(Text)
     retry_count = Column(Integer, default=0)

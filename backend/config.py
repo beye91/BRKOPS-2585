@@ -94,6 +94,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     webex_webhook_url: Optional[str] = None
     webex_bot_token: Optional[str] = None
+    webex_room_id: Optional[str] = None
     servicenow_instance: Optional[str] = None
     servicenow_username: Optional[str] = None
     servicenow_password: Optional[str] = None

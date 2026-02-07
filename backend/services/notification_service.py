@@ -22,6 +22,7 @@ class NotificationService:
         """Initialize notification service."""
         self.webex_webhook_url = settings.webex_webhook_url
         self.webex_bot_token = settings.webex_bot_token
+        self.webex_room_id = settings.webex_room_id
         self.servicenow_instance = settings.servicenow_instance
         self.servicenow_username = settings.servicenow_username
         self.servicenow_password = settings.servicenow_password
@@ -55,9 +56,10 @@ class NotificationService:
         if self.webex_webhook_url and not room_id:
             return await self._send_webex_webhook(text or markdown)
 
-        # Use bot token for direct API calls
+        # Use bot token for direct API calls (fall back to default room)
         if self.webex_bot_token:
-            return await self._send_webex_api(room_id, text, markdown, attachments)
+            target_room = room_id or self.webex_room_id
+            return await self._send_webex_api(target_room, text, markdown, attachments)
 
         return {"success": False, "error": "No WebEx credentials configured"}
 
@@ -150,16 +152,28 @@ class NotificationService:
             }
 
         if self.webex_bot_token:
-            # Just verify the token is valid
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
+                    # Verify the token is valid
                     response = await client.get(
                         "https://webexapis.com/v1/people/me",
                         headers={"Authorization": f"Bearer {self.webex_bot_token}"},
                     )
-                    if response.status_code == 200:
-                        return {"success": True, "method": "api", "message": "Bot token valid"}
-                    return {"success": False, "method": "api", "error": "Invalid bot token"}
+                    if response.status_code != 200:
+                        return {"success": False, "method": "api", "error": "Invalid bot token"}
+
+                    bot_name = response.json().get("displayName", "Bot")
+
+                    # Send a test message if room is configured
+                    if self.webex_room_id:
+                        result = await self._send_webex_api(
+                            self.webex_room_id, None, f"**{bot_name}** - Connection test from BRKOPS-2585", None
+                        )
+                        if result["success"]:
+                            return {"success": True, "method": "api", "message": f"Test message sent to room via {bot_name}"}
+                        return {"success": False, "method": "api", "error": f"Token valid but failed to send: {result.get('error')}"}
+
+                    return {"success": True, "method": "api", "message": f"Bot token valid ({bot_name}), no default room configured"}
             except Exception as e:
                 return {"success": False, "method": "api", "error": str(e)}
 

@@ -144,8 +144,8 @@ async def send_webex_message(
         notification.response_data = result.get("response")
         notification.error_message = result.get("error")
         if result["success"]:
-            from datetime import datetime
-            notification.sent_at = datetime.utcnow()
+            from datetime import datetime, timezone
+            notification.sent_at = datetime.now(timezone.utc)
 
         await db.commit()
         await db.refresh(notification)
@@ -223,8 +223,8 @@ async def create_servicenow_ticket(
         notification.response_data = result.get("response")
         notification.error_message = result.get("error")
         if result["success"]:
-            from datetime import datetime
-            notification.sent_at = datetime.utcnow()
+            from datetime import datetime, timezone
+            notification.sent_at = datetime.now(timezone.utc)
 
         await db.commit()
         await db.refresh(notification)
