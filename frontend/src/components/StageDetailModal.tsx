@@ -162,20 +162,75 @@ export function StageDetailModal({
         );
 
       case 'config_generation':
+        const hasPerDevice = data.per_device_configs && Object.keys(data.per_device_configs).length > 0;
+        const perDeviceEntries = hasPerDevice ? Object.entries(data.per_device_configs) : [];
+        const showPerDevice = perDeviceEntries.length > 1;
+
         return (
           <div className="space-y-3">
-            <h4 className="font-medium text-sm text-text-secondary">Generated Commands</h4>
-            <pre className="text-xs font-mono bg-background p-3 rounded-lg overflow-x-auto text-primary">
-              {data.commands?.join('\n')}
-            </pre>
-            {data.rollback_commands && (
+            {/* Summary info */}
+            {data.explanation && (
+              <div className="bg-background p-3 rounded-lg">
+                <span className="text-xs text-text-muted">Explanation</span>
+                <p className="text-sm mt-1">{data.explanation}</p>
+              </div>
+            )}
+
+            {/* Per-device configs when multiple devices */}
+            {showPerDevice ? (
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm text-text-secondary">Per-Device Commands</h4>
+                {perDeviceEntries.map(([device, cfg]: [string, any]) => (
+                  <div key={device} className="border border-border rounded-lg p-3">
+                    <h5 className="font-medium text-sm mb-2 text-primary">
+                      {device}
+                      {cfg.hostname && cfg.hostname !== device && (
+                        <span className="text-text-muted font-normal ml-2">({cfg.hostname})</span>
+                      )}
+                      <span className="text-xs text-text-muted ml-2">
+                        {cfg.commands?.length || 0} commands
+                      </span>
+                    </h5>
+                    {cfg.commands?.length > 0 && (
+                      <pre className="text-xs font-mono bg-background p-2 rounded overflow-x-auto text-primary max-h-32 overflow-y-auto">
+                        {cfg.commands?.join('\n')}
+                      </pre>
+                    )}
+                    {cfg.rollback_commands?.length > 0 && (
+                      <>
+                        <span className="text-xs text-text-muted mt-2 block">Rollback</span>
+                        <pre className="text-xs font-mono bg-background p-2 rounded overflow-x-auto text-warning max-h-24 overflow-y-auto">
+                          {cfg.rollback_commands?.join('\n')}
+                        </pre>
+                      </>
+                    )}
+                    {cfg.warnings?.length > 0 && cfg.warnings.filter((w: string) => !w.startsWith('Generated password')).length > 0 && (
+                      <div className="mt-2 text-xs text-warning">
+                        {cfg.warnings.filter((w: string) => !w.startsWith('Generated password')).map((w: string, i: number) => (
+                          <p key={i}>{w}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
               <>
-                <h4 className="font-medium text-sm text-text-secondary mt-4">Rollback Commands</h4>
-                <pre className="text-xs font-mono bg-background p-3 rounded-lg overflow-x-auto text-warning">
-                  {data.rollback_commands?.join('\n')}
+                <h4 className="font-medium text-sm text-text-secondary">Generated Commands</h4>
+                <pre className="text-xs font-mono bg-background p-3 rounded-lg overflow-x-auto text-primary">
+                  {data.commands?.join('\n')}
                 </pre>
+                {data.rollback_commands?.length > 0 && (
+                  <>
+                    <h4 className="font-medium text-sm text-text-secondary mt-4">Rollback Commands</h4>
+                    <pre className="text-xs font-mono bg-background p-3 rounded-lg overflow-x-auto text-warning">
+                      {data.rollback_commands?.join('\n')}
+                    </pre>
+                  </>
+                )}
               </>
             )}
+
             {data.risk_level && (
               <div className="flex items-center gap-2">
                 <AlertTriangle className={cn(

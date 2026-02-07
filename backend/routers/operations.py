@@ -468,9 +468,17 @@ async def rollback_operation(
 
     # Get rollback commands from config_generation stage
     config_gen = job.stages_data.get("config_generation", {})
-    rollback_commands = config_gen.get("data", {}).get("rollback_commands", [])
+    config_gen_data = config_gen.get("data", {})
+    rollback_commands = config_gen_data.get("rollback_commands", [])
+    per_device_configs = config_gen_data.get("per_device_configs", {})
 
-    if not rollback_commands:
+    # Check if any rollback commands exist (flat or per-device)
+    has_rollback = bool(rollback_commands) or any(
+        cfg.get("rollback_commands")
+        for cfg in per_device_configs.values()
+    )
+
+    if not has_rollback:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No rollback commands available for this operation",
@@ -545,15 +553,20 @@ async def rollback_operation(
             raise Exception("No active CML server configured")
 
         client = CMLClient(cml_server.endpoint, cml_server.auth_config)
-        config_block = "\n".join(rollback_commands)
 
-        # Rollback ALL deployed devices
+        # Rollback ALL deployed devices with per-device commands
         rollback_results = {}
         rollback_success_count = 0
         rollback_fail_count = 0
 
         for device_label, node_id in devices_to_rollback:
             try:
+                # Use per-device rollback commands if available, else flat rollback
+                device_rollback = per_device_configs.get(device_label, {}).get(
+                    "rollback_commands", rollback_commands
+                )
+                config_block = "\n".join(device_rollback)
+
                 result = await client.apply_config(
                     lab_id=lab_id,
                     node_id=node_id,

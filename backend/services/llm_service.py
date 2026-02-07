@@ -261,36 +261,82 @@ class LLMService:
                 "action": "modify_ospf_area",
                 "target_devices": target_devices,
                 "parameters": {
-                    "ospf_process_id": 1,
                     "new_area": int(area),
-                    "interfaces": ["GigabitEthernet2", "GigabitEthernet3", "GigabitEthernet4"]
                 },
                 "confidence": 95,
                 "reasoning": f"User wants to change OSPF configuration on {target_desc} to use area {area}"
             }
 
         elif "credential" in transcript_lower or "password" in transcript_lower:
+            import re as _re
+
+            # Detect "all" keyword
+            all_pattern = _re.search(
+                r'\b(all\s+(routers?|devices?|of\s+them|network\s+devices?)|every\s+(router|device))\b',
+                transcript_lower
+            )
+            if all_pattern:
+                cred_devices = ["all"]
+            else:
+                router_matches = _re.findall(r'router[-\s]?(\d+)', transcript_lower)
+                if router_matches:
+                    seen = set()
+                    cred_devices = []
+                    for num in router_matches:
+                        d = f"Router-{num}"
+                        if d not in seen:
+                            seen.add(d)
+                            cred_devices.append(d)
+                else:
+                    cred_devices = ["all"]
+
             return {
                 "action": "rotate_credentials",
-                "target_devices": ["Router-1", "Router-2", "Router-3", "Router-4"],
+                "target_devices": cred_devices,
                 "parameters": {
                     "credential_type": "enable_secret",
                     "scope": "datacenter"
                 },
                 "confidence": 90,
-                "reasoning": "User wants to rotate credentials across datacenter devices"
+                "reasoning": "User wants to rotate credentials across devices"
             }
 
         elif "security" in transcript_lower or "cve" in transcript_lower:
+            import re as _re
+
+            # Extract CVE ID from transcript
+            cve_match = _re.search(r'cve[-\s]?(\d{4}[-\s]?\d+)', transcript_lower)
+            cve_id = f"CVE-{cve_match.group(1).replace(' ', '-')}" if cve_match else "SEC-ADVISORY"
+
+            # Detect "all" keyword or specific routers
+            all_pattern = _re.search(
+                r'\b(all\s+(routers?|devices?|of\s+them|network\s+devices?)|every\s+(router|device))\b',
+                transcript_lower
+            )
+            if all_pattern:
+                sec_devices = ["all"]
+            else:
+                router_matches = _re.findall(r'router[-\s]?(\d+)', transcript_lower)
+                if router_matches:
+                    seen = set()
+                    sec_devices = []
+                    for num in router_matches:
+                        d = f"Router-{num}"
+                        if d not in seen:
+                            seen.add(d)
+                            sec_devices.append(d)
+                else:
+                    sec_devices = ["all"]
+
             return {
                 "action": "apply_security_patch",
-                "target_devices": ["Router-1", "Router-2"],
+                "target_devices": sec_devices,
                 "parameters": {
-                    "cve_id": "CVE-2024-1234",
+                    "cve_id": cve_id,
                     "patch_type": "access_list"
                 },
                 "confidence": 88,
-                "reasoning": "User wants to apply security remediation for CVE"
+                "reasoning": f"User wants to apply security remediation for {cve_id}"
             }
 
         else:
@@ -359,36 +405,47 @@ class LLMService:
             raise ValueError(f"Failed to parse JSON from response: {response}")
 
     def _generate_demo_advice(self, intent: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate realistic demo advice based on intent and config."""
+        """Generate advice derived from real per-device config data."""
         action = intent.get("action", "")
         risk_level = config.get("risk_level", "medium")
         devices = intent.get("target_devices", ["Router-1"])
+        per_device = config.get("per_device_configs", {})
 
         risk_factors = []
         mitigation_steps = []
         pre_checks = []
 
-        if action == "modify_ospf_area":
-            risk_factors = [
-                "OSPF area change will cause temporary neighbor adjacency reset",
-                f"Affects {len(devices)} device(s) in the network",
-                "May cause brief traffic rerouting during convergence"
-            ]
+        device_count = len(per_device) if per_device else len(devices)
+
+        # Build risk factors from real config data
+        if per_device:
+            for device_label, cfg in per_device.items():
+                cmd_count = len(cfg.get("commands", []))
+                has_rollback = len(cfg.get("rollback_commands", [])) > 0
+                warnings = cfg.get("warnings", [])
+                if cmd_count > 0:
+                    risk_factors.append(f"{device_label}: {cmd_count} commands to apply (rollback {'ready' if has_rollback else 'NOT available'})")
+                for w in warnings:
+                    if "already in area" not in w and "Generated password" not in w:
+                        risk_factors.append(f"{device_label}: {w}")
+
+        if action in ("modify_ospf_area", "modify_ospf_config", "change_area"):
+            risk_factors.append("OSPF area change will cause temporary neighbor adjacency reset")
+            if device_count > 2:
+                risk_factors.append(f"High impact: {device_count} devices affected simultaneously")
             mitigation_steps = [
                 "Ensure backup paths exist before applying changes",
                 "Apply during maintenance window if possible",
-                "Have rollback commands ready"
+                "Per-device rollback commands are ready"
             ]
             pre_checks = [
-                "Verify current OSPF neighbor state",
+                "Verify current OSPF neighbor state on all target devices",
                 "Confirm no active maintenance on affected devices",
-                "Check that rollback commands are correct"
+                "Review per-device rollback commands"
             ]
         elif action == "rotate_credentials":
-            risk_factors = [
-                "Credential change affects device access",
-                "Concurrent sessions may be impacted"
-            ]
+            risk_factors.append("Credential change affects device access")
+            risk_factors.append("Concurrent sessions may be impacted")
             mitigation_steps = [
                 "Ensure new credentials are documented securely",
                 "Test access with new credentials immediately after change"
@@ -397,11 +454,9 @@ class LLMService:
                 "Verify current access to affected devices",
                 "Confirm new password meets complexity requirements"
             ]
-        elif action == "apply_security_patch":
-            risk_factors = [
-                "ACL changes may impact legitimate traffic",
-                "Blocking rules are permanent until removed"
-            ]
+        elif action in ("apply_security_patch", "security_remediation"):
+            risk_factors.append("ACL changes may impact legitimate traffic")
+            risk_factors.append("Blocking rules are permanent until removed")
             mitigation_steps = [
                 "Monitor traffic after applying ACL",
                 "Have NOC on standby for any user reports"
@@ -411,18 +466,32 @@ class LLMService:
                 "Verify interface attachment points"
             ]
         else:
-            risk_factors = ["Generic configuration change with unknown impact"]
+            risk_factors.append("Generic configuration change")
             mitigation_steps = ["Review carefully before approval"]
             pre_checks = ["Validate configuration syntax"]
 
+        # Determine risk level from device count
+        if device_count > 2:
+            computed_risk = "HIGH"
+        elif device_count > 1:
+            computed_risk = "MEDIUM"
+        else:
+            computed_risk = risk_level.upper() if isinstance(risk_level, str) else "MEDIUM"
+
+        # Check all devices have rollback
+        all_rollback = all(
+            len(cfg.get("rollback_commands", [])) > 0
+            for cfg in per_device.values()
+        ) if per_device else bool(config.get("rollback_commands"))
+
         return {
-            "risk_level": risk_level.upper() if isinstance(risk_level, str) else "MEDIUM",
+            "risk_level": computed_risk,
             "risk_factors": risk_factors,
             "mitigation_steps": mitigation_steps,
             "impact_assessment": config.get("estimated_impact", "Expected brief service impact during change application"),
-            "rollback_ready": bool(config.get("rollback_commands")),
+            "rollback_ready": all_rollback,
             "recommendation": "APPROVE",
-            "recommendation_reason": f"Configuration is syntactically correct and follows best practices. {len(devices)} device(s) targeted with adequate rollback commands provided.",
+            "recommendation_reason": f"Configuration built from live running configs. {device_count} device(s) targeted with {'per-device' if per_device else 'shared'} rollback commands.",
             "pre_checks": pre_checks,
             "estimated_duration": "30-60 seconds for configuration application, 15-45 seconds for convergence",
             "affected_services": ["OSPF routing", "Inter-area traffic"] if "ospf" in action else ["Device access"]
@@ -445,10 +514,9 @@ class LLMService:
         Returns:
             Generated configuration as dictionary
         """
-        # Demo mode: return realistic mock config
-        if self.demo_mode:
-            logger.info("Demo mode: returning mock config")
-            return self._generate_demo_config(intent)
+        # Note: demo mode config generation is now handled by config_builder
+        # in pipeline.py:process_config_generation() using real running configs.
+        # This method is only called as LLM fallback when running configs are unavailable.
 
         prompt = config_prompt.replace("{{intent}}", json.dumps(intent, indent=2))
         if current_config:
@@ -474,87 +542,6 @@ class LLMService:
             if json_match:
                 return json.loads(json_match.group())
             raise ValueError(f"Failed to parse JSON from response: {response}")
-
-    def _generate_demo_config(self, intent: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate realistic demo config based on intent."""
-        action = intent.get("action", "")
-        params = intent.get("parameters", {})
-        devices = intent.get("target_devices", ["Router-1"])
-
-        if action == "modify_ospf_area":
-            new_area = params.get("new_area", 10)
-            interfaces = params.get("interfaces", ["GigabitEthernet2"])
-            process_id = params.get("ospf_process_id", 1)
-
-            commands = [
-                f"router ospf {process_id}",
-            ]
-            rollback_commands = [
-                f"router ospf {process_id}",
-            ]
-
-            for iface in interfaces:
-                commands.append(f"  interface {iface}")
-                commands.append(f"    ip ospf {process_id} area {new_area}")
-                rollback_commands.append(f"  interface {iface}")
-                rollback_commands.append(f"    ip ospf {process_id} area 0")
-
-            return {
-                "commands": commands,
-                "rollback_commands": rollback_commands,
-                "target_devices": devices,
-                "explanation": f"Configure OSPF area {new_area} on interfaces {', '.join(interfaces)}",
-                "risk_level": "medium",
-                "estimated_impact": "Brief OSPF neighbor flap during area transition"
-            }
-
-        elif action == "rotate_credentials":
-            return {
-                "commands": [
-                    "enable algorithm-type sha256 secret NewSecureP@ss2024!",
-                    "username admin privilege 15 algorithm-type sha256 secret NewSecureP@ss2024!"
-                ],
-                "rollback_commands": [
-                    "enable algorithm-type sha256 secret OldP@ssword123",
-                    "username admin privilege 15 algorithm-type sha256 secret OldP@ssword123"
-                ],
-                "target_devices": devices,
-                "explanation": "Rotate enable secret and admin credentials with SHA-256 hashing",
-                "risk_level": "low",
-                "estimated_impact": "No service impact expected"
-            }
-
-        elif action == "apply_security_patch":
-            cve = params.get("cve_id", "CVE-2024-1234")
-            return {
-                "commands": [
-                    "ip access-list extended CVE-2024-1234-BLOCK",
-                    "  deny tcp any any eq 445 log",
-                    "  deny udp any any eq 445 log",
-                    "  permit ip any any",
-                    "interface GigabitEthernet1",
-                    "  ip access-group CVE-2024-1234-BLOCK in"
-                ],
-                "rollback_commands": [
-                    "no ip access-list extended CVE-2024-1234-BLOCK",
-                    "interface GigabitEthernet1",
-                    "  no ip access-group CVE-2024-1234-BLOCK in"
-                ],
-                "target_devices": devices,
-                "explanation": f"Apply security ACL to block exploit traffic for {cve}",
-                "risk_level": "low",
-                "estimated_impact": "Potential minor latency increase from ACL processing"
-            }
-
-        else:
-            return {
-                "commands": ["! No specific commands generated"],
-                "rollback_commands": ["! No rollback needed"],
-                "target_devices": devices,
-                "explanation": "Generic configuration placeholder",
-                "risk_level": "unknown",
-                "estimated_impact": "Unknown"
-            }
 
     async def analyze_results(
         self,
@@ -605,59 +592,27 @@ class LLMService:
             raise ValueError(f"Failed to parse JSON from response: {response}")
 
     def _generate_demo_analysis(self, config: Dict[str, Any], splunk_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate realistic demo analysis/validation results."""
+        """Generate analysis results. No longer returns fake metrics."""
         explanation = config.get("explanation", "Configuration change")
 
         return {
             "status": "healthy",
             "overall_score": 95,
-            "summary": f"Configuration change applied successfully. {explanation}",
+            "summary": f"Configuration change applied. {explanation}",
             "validation_status": "PASSED",
             "findings": [
                 {
-                    "category": "OSPF Convergence",
+                    "category": "Deployment Status",
                     "status": "ok",
-                    "message": "OSPF neighbors re-established within 5 seconds",
+                    "message": "Configuration commands applied to target device(s)",
                     "severity": "info"
                 },
-                {
-                    "category": "Interface Status",
-                    "status": "ok",
-                    "message": "All configured interfaces are up/up",
-                    "severity": "info"
-                },
-                {
-                    "category": "CPU Utilization",
-                    "status": "ok",
-                    "message": "CPU utilization within normal range (12%)",
-                    "severity": "info"
-                },
-                {
-                    "category": "Memory Usage",
-                    "status": "ok",
-                    "message": "Memory usage stable at 45%",
-                    "severity": "info"
-                }
             ],
-            "metrics": {
-                "ospf_convergence_time_ms": 4850,
-                "neighbor_count": 3,
-                "routes_in_area": 12,
-                "cpu_utilization_percent": 12,
-                "memory_utilization_percent": 45
-            },
+            "metrics": {},
             "deployment_verified": True,
-            "post_deployment_status": "Configuration applied and verified successfully",
-            "recommendation": "No action required",
-            "recommendation_reason": "All health checks passed. OSPF converged successfully with no anomalies detected.",
-            "risk_assessment": {
-                "level": "low",
-                "factors": [
-                    "Single area configuration change",
-                    "No traffic disruption observed",
-                    "All neighbors stable"
-                ]
-            }
+            "post_deployment_status": "Configuration applied",
+            "recommendation": "Verify via monitoring stage",
+            "recommendation_reason": "Analysis based on deployment result only. Real metrics come from monitoring diff.",
         }
 
     async def validate_deployment(
@@ -816,20 +771,14 @@ Always respond with valid JSON including:
                     "severity": "critical" if route_change < -2 else "warning"
                 })
 
-        base_findings = [
-            {
-                "category": "OSPF Convergence",
+        base_findings = []
+        if not diff_findings:
+            base_findings.append({
+                "category": "Deployment Status",
                 "status": "ok",
-                "message": "OSPF neighbors re-established within expected timeframe",
+                "message": "Configuration commands applied to target device(s)",
                 "severity": "info"
-            },
-            {
-                "category": "CPU Utilization",
-                "status": "ok",
-                "message": "CPU utilization within normal range (12%)",
-                "severity": "info"
-            },
-        ]
+            })
 
         all_findings = diff_findings + base_findings
 
@@ -856,11 +805,8 @@ Always respond with valid JSON including:
             "validation_status": validation_status,
             "findings": all_findings,
             "metrics": {
-                "ospf_convergence_time_ms": 4850,
-                "neighbor_count": monitoring_diff.get("ospf_neighbors", {}).get("after", 3) if monitoring_diff else 3,
-                "routes_in_area": monitoring_diff.get("routes", {}).get("after", 12) if monitoring_diff else 12,
-                "cpu_utilization_percent": 12,
-                "memory_utilization_percent": 45
+                "neighbor_count": monitoring_diff.get("ospf_neighbors", {}).get("after") if monitoring_diff else None,
+                "routes_in_area": monitoring_diff.get("routes", {}).get("after") if monitoring_diff else None,
             },
             "deployment_verified": not rollback_recommended,
             "post_deployment_status": "CRITICAL - Rollback Required" if rollback_recommended else "Configuration applied and verified",

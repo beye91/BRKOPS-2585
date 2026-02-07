@@ -132,6 +132,31 @@ async def collect_network_state(
     except Exception as e:
         state["errors"].append(f"Route collection failed: {str(e)}")
 
+    # Collect CPU utilization
+    try:
+        import re as _re
+        cpu_output = await client.run_command(
+            lab_id, device_label, "show processes cpu | include CPU utilization"
+        )
+        cpu_match = _re.search(r'five seconds:\s*(\d+)%', cpu_output)
+        state["cpu_utilization_percent"] = int(cpu_match.group(1)) if cpu_match else None
+    except Exception as e:
+        state["errors"].append(f"CPU collection failed: {str(e)}")
+
+    # Collect memory utilization
+    try:
+        import re as _re
+        mem_output = await client.run_command(
+            lab_id, device_label, "show processes memory | include Processor"
+        )
+        mem_match = _re.search(r'Total:\s*(\d+)\s*Used:\s*(\d+)', mem_output)
+        if mem_match:
+            total = int(mem_match.group(1))
+            used = int(mem_match.group(2))
+            state["memory_utilization_percent"] = round(used / total * 100, 1) if total > 0 else None
+    except Exception as e:
+        state["errors"].append(f"Memory collection failed: {str(e)}")
+
     return state
 
 
@@ -637,35 +662,179 @@ async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase,
 
 
 async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
-    """Generate configuration from intent."""
+    """Generate configuration from intent using real running configs from CML devices."""
     logger.info("Generating config", job_id=str(job.id))
 
-    llm_service = LLMService(
-        demo_mode=demo_mode,
-        provider=getattr(use_case, 'llm_provider', None) if use_case else None,
-        model=getattr(use_case, 'llm_model', None) if use_case else None,
+    from services.config_builder import (
+        parse_running_config,
+        build_ospf_area_change,
+        build_credential_rotation,
+        build_security_acl,
     )
 
-    # Get previous stage data
     intent = job.stages_data.get("intent_parsing", {}).get("data", {})
+    target_devices = intent.get("target_devices", [])
+    action = intent.get("action", "")
+    params = intent.get("parameters", {})
 
-    # Get config prompt from use case or default
-    config_prompt = use_case.config_prompt if use_case else """
-    Generate Cisco IOS configuration for the following intent:
+    # --- Fetch running configs from CML ---
+    running_configs = {}
+    try:
+        result = await db.execute(
+            select(MCPServer).where(MCPServer.type == MCPServerType.CML, MCPServer.is_active == True)
+        )
+        cml_server = result.scalar_one_or_none()
 
-    Intent: {{intent}}
+        if cml_server and target_devices:
+            client = CMLClient(cml_server.endpoint, cml_server.auth_config)
+            lab_id = use_case.cml_target_lab if use_case else None
+            if not lab_id:
+                labs = await client.get_labs()
+                if labs:
+                    lab_id = labs[0].get("id")
 
-    Respond in JSON format with:
-    - commands: List of configuration commands
-    - rollback_commands: List of rollback commands
-    - explanation: Brief explanation
-    """
+            if lab_id:
+                # Fetch running configs in parallel
+                async def _fetch(device_label: str) -> Tuple[str, str]:
+                    try:
+                        output = await client.run_command(lab_id, device_label, "show running-config")
+                        return device_label, output
+                    except Exception as e:
+                        logger.warning("Failed to fetch running config", device=device_label, error=str(e))
+                        return device_label, ""
 
-    config = await llm_service.generate_config(intent, config_prompt)
+                tasks = [_fetch(d) for d in target_devices]
+                results = await asyncio.gather(*tasks)
+                running_configs = {label: cfg for label, cfg in results}
 
-    logger.info("Config generated", job_id=str(job.id), command_count=len(config.get("commands", [])))
+                logger.info(
+                    "Running configs fetched",
+                    job_id=str(job.id),
+                    devices=list(running_configs.keys()),
+                    non_empty=sum(1 for v in running_configs.values() if v),
+                )
+    except Exception as e:
+        logger.warning("CML running config fetch failed, proceeding without", error=str(e))
 
-    return config
+    # --- Build per-device configs using config_builder ---
+    per_device_configs = {}
+
+    if running_configs:
+        for device_label in target_devices:
+            raw_config = running_configs.get(device_label, "")
+            if not raw_config:
+                per_device_configs[device_label] = {
+                    "commands": [],
+                    "rollback_commands": [],
+                    "warnings": [f"No running config available for {device_label}"],
+                }
+                continue
+
+            parsed = parse_running_config(raw_config)
+
+            if action in ("modify_ospf_area", "modify_ospf_config", "change_area"):
+                change = build_ospf_area_change(
+                    parsed,
+                    new_area=params.get("new_area", 10),
+                    ospf_process_id=params.get("ospf_process_id"),
+                )
+            elif action == "rotate_credentials":
+                # Use same password across all devices for consistency
+                if not per_device_configs:
+                    change = build_credential_rotation(parsed)
+                    # Extract generated password for reuse
+                    _shared_password = None
+                    for w in change.warnings:
+                        if w.startswith("Generated password:"):
+                            _shared_password = w.split(": ", 1)[1]
+                            break
+                else:
+                    # Reuse the password from first device
+                    first_cfg = next(iter(per_device_configs.values()))
+                    _shared_password = None
+                    for w in first_cfg.get("warnings", []):
+                        if w.startswith("Generated password:"):
+                            _shared_password = w.split(": ", 1)[1]
+                            break
+                    change = build_credential_rotation(parsed, new_password=_shared_password)
+            elif action in ("apply_security_patch", "security_remediation"):
+                cve_id = params.get("cve_id", "SEC")
+                acl_name = f"{cve_id}-BLOCK"
+                rules = params.get("acl_rules", [
+                    {"action": "deny", "protocol": "tcp", "source": "any", "destination": "any eq 445", "extras": "log"},
+                    {"action": "deny", "protocol": "udp", "source": "any", "destination": "any eq 445", "extras": "log"},
+                ])
+                change = build_security_acl(parsed, acl_name=acl_name, rules=rules)
+            else:
+                change = build_ospf_area_change(parsed, new_area=params.get("new_area", 10))
+
+            per_device_configs[device_label] = {
+                "commands": change.commands,
+                "rollback_commands": change.rollback_commands,
+                "warnings": change.warnings,
+                "running_config_snapshot": raw_config[:5000],
+                "hostname": parsed.hostname,
+            }
+
+    # --- Fallback to LLM-based config generation if no running configs ---
+    if not per_device_configs:
+        logger.warning("No running configs, falling back to LLM config generation", job_id=str(job.id))
+        llm_service = LLMService(
+            demo_mode=demo_mode,
+            provider=getattr(use_case, 'llm_provider', None) if use_case else None,
+            model=getattr(use_case, 'llm_model', None) if use_case else None,
+        )
+        config_prompt = use_case.config_prompt if use_case else """
+        Generate Cisco IOS configuration for the following intent:
+
+        Intent: {{intent}}
+
+        Respond in JSON format with:
+        - commands: List of configuration commands
+        - rollback_commands: List of rollback commands
+        - explanation: Brief explanation
+        """
+        config = await llm_service.generate_config(intent, config_prompt)
+        logger.info("Config generated via LLM", job_id=str(job.id), command_count=len(config.get("commands", [])))
+        return config
+
+    # --- Build response with backward-compat flat fields + per_device_configs ---
+    first_device = target_devices[0] if target_devices else None
+    first_cfg = per_device_configs.get(first_device, {}) if first_device else {}
+
+    # Determine risk level based on scope
+    device_count = len(per_device_configs)
+    risk_level = "high" if device_count > 2 else ("medium" if device_count > 1 else "low")
+
+    # Build explanation from action
+    if action in ("modify_ospf_area", "modify_ospf_config", "change_area"):
+        explanation = f"Change OSPF area to {params.get('new_area', 10)} on {device_count} device(s) based on live running configs"
+    elif action == "rotate_credentials":
+        explanation = f"Rotate credentials on {device_count} device(s) with SHA-256 hashed password"
+    elif action in ("apply_security_patch", "security_remediation"):
+        explanation = f"Apply security ACL on {device_count} device(s) to block exploit traffic"
+    else:
+        explanation = f"Configuration change on {device_count} device(s)"
+
+    config_result = {
+        "commands": first_cfg.get("commands", []),
+        "rollback_commands": first_cfg.get("rollback_commands", []),
+        "per_device_configs": per_device_configs,
+        "target_devices": target_devices,
+        "explanation": explanation,
+        "risk_level": risk_level,
+        "estimated_impact": "Brief OSPF neighbor flap during area transition" if "ospf" in action else "Minimal impact expected",
+    }
+
+    total_commands = sum(len(c.get("commands", [])) for c in per_device_configs.values())
+    logger.info(
+        "Config generated from running configs",
+        job_id=str(job.id),
+        devices=device_count,
+        total_commands=total_commands,
+    )
+
+    return config_result
 
 
 async def process_ai_advice(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
@@ -736,10 +905,11 @@ async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase,
         if not target_devices:
             return {"deployed": False, "error": "No target devices specified"}
 
-        commands = config.get("commands", [])
-        config_text = "\n".join(commands)
+        # Get per-device configs (if available) or fall back to flat commands
+        per_device_configs = config.get("per_device_configs", {})
+        flat_commands = config.get("commands", [])
 
-        # Deploy to ALL target devices
+        # Deploy to ALL target devices with per-device commands
         device_results = {}
         deployed_devices = []
         failed_devices = []
@@ -755,11 +925,25 @@ async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase,
                     failed_devices.append(device_label)
                     continue
 
+                # Use per-device commands if available, else flat commands
+                device_cfg = per_device_configs.get(device_label, {})
+                device_commands = device_cfg.get("commands", flat_commands)
+                config_text = "\n".join(device_commands)
+
+                if not device_commands:
+                    device_results[device_label] = {
+                        "deployed": False,
+                        "error": f"No commands for {device_label}",
+                    }
+                    failed_devices.append(device_label)
+                    continue
+
                 await client.apply_config(lab_id, node["id"], config_text)
 
                 device_results[device_label] = {
                     "deployed": True,
                     "node_id": node["id"],
+                    "commands_count": len(device_commands),
                 }
                 deployed_devices.append(device_label)
 
@@ -798,7 +982,10 @@ async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase,
             "devices": deployed_devices,                     # all deployed
             "failed_devices": failed_devices,
             "device_results": device_results,                # per-device detail
-            "commands_applied": len(commands),
+            "commands_applied": sum(
+                r.get("commands_count", len(flat_commands))
+                for r in device_results.values() if r.get("deployed")
+            ),
         }
 
     except Exception as e:
