@@ -238,7 +238,7 @@ export function StageDetailModal({
               <>
                 {/* Show affected interfaces for single-device view */}
                 {(() => {
-                  const singleCfg = perDeviceEntries.length === 1 ? perDeviceEntries[0][1] : null;
+                  const singleCfg: any = perDeviceEntries.length === 1 ? perDeviceEntries[0][1] : null;
                   const interfaces = singleCfg?.affected_interfaces || [];
                   if (interfaces.length === 0) return null;
                   return (
