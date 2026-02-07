@@ -643,10 +643,28 @@ class LLMService:
         if monitoring_diff:
             prompt = prompt.replace("{{monitoring_diff}}", json.dumps(monitoring_diff, indent=2))
 
-        system_prompt = """You are a network operations analyst validating deployment results.
-        Analyze post-deployment monitoring data to confirm successful deployment.
-        Identify any issues, determine severity, and confirm if the deployment was successful.
-        Always respond with valid JSON."""
+        system_prompt = """You are a senior network engineer validating deployment results.
+
+CRITICAL TASK: Determine if this deployment was successful or requires rollback.
+
+Analyze these inputs:
+1. Monitoring Diff: Did OSPF neighbors, interfaces, or routes decrease?
+2. Splunk Logs: Any ERROR messages, neighbor down events, or routing failures?
+3. Expected vs Actual: Does the result match the intended change?
+
+ROLLBACK DECISION CRITERIA:
+- ROLLBACK REQUIRED: If neighbors lost, interfaces down, or critical errors in logs
+- ACCEPTABLE: Minor warnings but network stable, no loss of connectivity
+- SUCCESS: Change applied cleanly, network converged as expected
+
+You MUST provide a clear recommendation: "ROLLBACK REQUIRED", "ACCEPTABLE", or "SUCCESS".
+
+Always respond with valid JSON including:
+- validation_status: "PASSED|WARNING|FAILED"
+- rollback_recommended: boolean
+- rollback_reason: string explaining why rollback is needed (if applicable)
+- findings: array of specific issues found
+- recommendation: clear action for operator"""
 
         response = await self.complete(
             prompt=prompt,
@@ -669,16 +687,38 @@ class LLMService:
         splunk_results: Dict[str, Any],
         monitoring_diff: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Generate realistic demo validation results including diff analysis."""
+        """Generate realistic demo validation results including diff analysis and rollback recommendations."""
         explanation = config.get("explanation", "Configuration change")
 
-        # Analyze diff to determine status
+        # Initialize rollback variables
+        rollback_recommended = False
+        rollback_reason = None
+        validation_status = "PASSED"
+
+        # Analyze diff to determine status and rollback need
         diff_findings = []
         if monitoring_diff:
             ospf_change = monitoring_diff.get("ospf_neighbors", {}).get("change", 0)
             interface_change = monitoring_diff.get("interfaces_up", {}).get("change", 0)
             route_change = monitoring_diff.get("routes", {}).get("change", 0)
 
+            # CRITICAL: Rollback criteria - detect network degradation
+            if ospf_change < 0 or interface_change < 0:
+                rollback_recommended = True
+                validation_status = "FAILED"
+                rollback_reason = (
+                    f"Network degradation detected: "
+                    f"OSPF neighbors {ospf_change:+d}, interfaces {interface_change:+d}. "
+                    f"This indicates loss of connectivity or routing instability."
+                )
+            elif route_change < -2:  # Lost more than 2 routes
+                rollback_recommended = True
+                validation_status = "FAILED"
+                rollback_reason = f"Significant route loss detected: {route_change:+d} routes. This may indicate routing instability."
+            elif ospf_change < 0 or interface_change < 0 or route_change < 0:
+                validation_status = "WARNING"
+
+            # Build detailed findings for each metric
             if ospf_change >= 0:
                 diff_findings.append({
                     "category": "OSPF Neighbors",
@@ -689,9 +729,9 @@ class LLMService:
             else:
                 diff_findings.append({
                     "category": "OSPF Neighbors",
-                    "status": "warning",
-                    "message": f"OSPF neighbor count decreased ({ospf_change:+d})",
-                    "severity": "warning"
+                    "status": "error" if rollback_recommended else "warning",
+                    "message": f"CRITICAL: OSPF neighbor count decreased ({ospf_change:+d})",
+                    "severity": "critical" if rollback_recommended else "warning"
                 })
 
             if interface_change >= 0:
@@ -704,9 +744,9 @@ class LLMService:
             else:
                 diff_findings.append({
                     "category": "Interface Status",
-                    "status": "warning",
-                    "message": f"Some interfaces went down ({interface_change:+d})",
-                    "severity": "warning"
+                    "status": "error" if rollback_recommended else "warning",
+                    "message": f"CRITICAL: Some interfaces went down ({interface_change:+d})",
+                    "severity": "critical" if rollback_recommended else "warning"
                 })
 
             if route_change >= 0:
@@ -719,9 +759,9 @@ class LLMService:
             else:
                 diff_findings.append({
                     "category": "OSPF Routes",
-                    "status": "warning",
-                    "message": f"Some routes lost ({route_change:+d})",
-                    "severity": "warning"
+                    "status": "error" if rollback_recommended else "warning",
+                    "message": f"Routes lost ({route_change:+d})",
+                    "severity": "critical" if route_change < -2 else "warning"
                 })
 
         base_findings = [
@@ -741,13 +781,24 @@ class LLMService:
 
         all_findings = diff_findings + base_findings
 
-        # Determine validation status based on findings
-        has_warnings = any(f.get("status") == "warning" for f in all_findings)
-        validation_status = "WARNING" if has_warnings else "PASSED"
-        overall_score = 80 if has_warnings else 95
+        # Determine overall score based on validation status
+        if validation_status == "FAILED":
+            overall_score = 45
+        elif validation_status == "WARNING":
+            overall_score = 75
+        else:
+            overall_score = 95
+
+        # Build recommendation message
+        if rollback_recommended:
+            recommendation = f"ROLLBACK REQUIRED: {rollback_reason}"
+        elif validation_status == "WARNING":
+            recommendation = "Configuration applied with warnings. Monitor network closely for the next 10 minutes."
+        else:
+            recommendation = "Deployment successful. All metrics within expected parameters."
 
         return {
-            "status": "healthy" if not has_warnings else "degraded",
+            "status": "critical" if rollback_recommended else ("degraded" if validation_status == "WARNING" else "healthy"),
             "overall_score": overall_score,
             "summary": f"Configuration change applied. {explanation}",
             "validation_status": validation_status,
@@ -759,10 +810,12 @@ class LLMService:
                 "cpu_utilization_percent": 12,
                 "memory_utilization_percent": 45
             },
-            "deployment_verified": True,
-            "post_deployment_status": "Configuration applied and verified",
-            "recommendation": "Review warnings" if has_warnings else "No action required",
-            "recommendation_reason": "Some metrics changed during deployment" if has_warnings else "All health checks passed",
+            "deployment_verified": not rollback_recommended,
+            "post_deployment_status": "CRITICAL - Rollback Required" if rollback_recommended else "Configuration applied and verified",
+            "recommendation": recommendation,
+            "recommendation_reason": rollback_reason if rollback_recommended else ("Some metrics changed during deployment" if validation_status == "WARNING" else "All health checks passed"),
+            "rollback_recommended": rollback_recommended,
+            "rollback_reason": rollback_reason,
         }
 
     async def generate_notification(

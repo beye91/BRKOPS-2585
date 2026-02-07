@@ -70,6 +70,9 @@ class UseCaseCreate(BaseModel):
     cml_target_lab: Optional[str] = Field(None, description="Target CML lab ID")
     splunk_index: str = Field("netops", description="Splunk index to query")
     convergence_wait_seconds: int = Field(45, description="Wait time after config push")
+    servicenow_enabled: bool = Field(False, description="Enable ServiceNow ticket creation")
+    allowed_actions: List[str] = Field(default=[], description="Allowed action types for scope validation")
+    scope_validation_enabled: bool = Field(True, description="Enable scope validation")
     is_active: bool = Field(True, description="Whether use case is active")
     sort_order: int = Field(0, description="Display sort order")
 
@@ -101,6 +104,9 @@ class UseCaseUpdate(BaseModel):
     cml_target_lab: Optional[str] = None
     splunk_index: Optional[str] = None
     convergence_wait_seconds: Optional[int] = None
+    servicenow_enabled: Optional[bool] = None
+    allowed_actions: Optional[List[str]] = None
+    scope_validation_enabled: Optional[bool] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
 
@@ -120,6 +126,9 @@ class UseCaseResponse(BaseModel):
     cml_target_lab: Optional[str] = None
     splunk_index: str
     convergence_wait_seconds: int
+    servicenow_enabled: bool = False
+    allowed_actions: List[str] = []
+    scope_validation_enabled: bool = True
     is_active: bool
     sort_order: int
     created_at: datetime

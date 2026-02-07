@@ -79,6 +79,9 @@ INSERT INTO use_cases (
     analysis_prompt,
     notification_template,
     convergence_wait_seconds,
+    servicenow_enabled,
+    allowed_actions,
+    scope_validation_enabled,
     is_active,
     sort_order
 ) VALUES (
@@ -172,6 +175,9 @@ Provide analysis in JSON format:
     }',
     45,
     true,
+    ARRAY['ospf', 'routing', 'modify_ospf_area', 'change_area', 'add_network', 'remove_network'],
+    true,
+    true,
     1
 ) ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
@@ -191,6 +197,9 @@ INSERT INTO use_cases (
     analysis_prompt,
     notification_template,
     convergence_wait_seconds,
+    servicenow_enabled,
+    allowed_actions,
+    scope_validation_enabled,
     is_active,
     sort_order
 ) VALUES (
@@ -274,6 +283,9 @@ Respond in JSON format:
     }',
     30,
     true,
+    ARRAY['credential', 'password', 'rotate', 'username', 'authentication'],
+    true,
+    true,
     2
 ) ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
@@ -290,6 +302,9 @@ INSERT INTO use_cases (
     analysis_prompt,
     notification_template,
     convergence_wait_seconds,
+    servicenow_enabled,
+    allowed_actions,
+    scope_validation_enabled,
     is_active,
     sort_order
 ) VALUES (
@@ -372,6 +387,9 @@ Respond in JSON format:
         }
     }',
     60,
+    true,
+    ARRAY['security', 'advisory', 'cve', 'vulnerability', 'patch', 'remediation'],
+    true,
     true,
     3
 ) ON CONFLICT (name) DO UPDATE SET

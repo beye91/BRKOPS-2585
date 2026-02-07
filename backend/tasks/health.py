@@ -29,7 +29,10 @@ async def check_mcp_health(ctx: dict):
                 tools = []
                 healthy = False
 
-                if server.type.value == "cml":
+                # server.type is a string ('cml', 'splunk'), not an enum
+                server_type = server.type.value if hasattr(server.type, 'value') else server.type
+
+                if server_type == "cml":
                     client = CMLClient(server.endpoint, server.auth_config)
                     try:
                         tools = await client.list_tools()
@@ -38,7 +41,7 @@ async def check_mcp_health(ctx: dict):
                         logger.warning("CML list_tools failed", error=str(e))
                         healthy = await client.health_check()
 
-                elif server.type.value == "splunk":
+                elif server_type == "splunk":
                     client = SplunkClient(server.endpoint, server.auth_config)
                     try:
                         tools = await client.list_tools()

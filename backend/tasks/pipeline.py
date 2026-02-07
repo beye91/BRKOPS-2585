@@ -537,7 +537,21 @@ async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase,
 
     intent = await llm_service.parse_intent(job.input_text, intent_prompt)
 
-    logger.info("Intent parsed", job_id=str(job.id), action=intent.get("action"))
+    # Validate intent scope if use case is provided
+    if use_case:
+        from backend.services.intent_validator import validate_intent_scope
+        is_valid, error_msg = validate_intent_scope(intent, use_case)
+
+        if not is_valid:
+            logger.warning(
+                "Intent validation failed",
+                job_id=str(job.id),
+                use_case=use_case.name,
+                error=error_msg
+            )
+            raise ValueError(error_msg)
+
+    logger.info("Intent parsed and validated", job_id=str(job.id), action=intent.get("action"))
 
     return intent
 
@@ -1041,17 +1055,45 @@ async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, 
             result = await notification_service.send_webex(markdown=message)
             results.append({"channel": "webex", "success": result.get("success")})
 
-    # Create ServiceNow ticket for warnings/critical
-    if severity in ["WARNING", "CRITICAL"]:
+    # Determine if we should create a ServiceNow ticket
+    servicenow_enabled = use_case.servicenow_enabled if use_case else False
+    rollback_recommended = validation.get("rollback_recommended", False)
+
+    should_create_ticket = False
+    ticket_reason = None
+
+    if servicenow_enabled:
+        if rollback_recommended:
+            # Always create ticket if rollback recommended
+            should_create_ticket = True
+            ticket_reason = "Deployment requires rollback"
+            severity = "CRITICAL"
+        elif validation_status == "FAILED" or validation_status == "ROLLBACK_REQUIRED":
+            should_create_ticket = True
+            ticket_reason = "Validation failed - rollback required"
+            severity = "CRITICAL"
+        elif severity == "WARNING":
+            # Create ticket for real warnings (not test breaks)
+            should_create_ticket = True
+            ticket_reason = "Deployment completed with warnings"
+        # else: SUCCESS or intentional test - no ticket
+
+    # Create ServiceNow ticket only if conditions met
+    if should_create_ticket:
         snow_template = template.get("servicenow", {})
         if snow_template:
             result = await notification_service.create_servicenow_ticket(
-                short_description=snow_template.get("short_description", f"Network Alert - {job.use_case_name}"),
-                description=f"Analysis Results:\n{validation}",
+                short_description=f"{snow_template.get('short_description', f'Network Alert - {job.use_case_name}')} - {ticket_reason}",
+                description=f"Validation Status: {validation_status}\n\nReason: {ticket_reason}\n\nDetails:\n{validation}",
                 category=snow_template.get("category", "Network"),
-                priority="2" if severity == "CRITICAL" else "3",
+                priority="1" if severity == "CRITICAL" else "3",
             )
-            results.append({"channel": "servicenow", "success": result.get("success")})
+            results.append({
+                "channel": "servicenow",
+                "success": result.get("success"),
+                "reason": ticket_reason,
+                "enabled": servicenow_enabled,
+            })
 
     return {
         "notifications_sent": len(results),
