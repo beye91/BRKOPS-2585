@@ -281,6 +281,9 @@ export function StageDetailModal({
         );
 
       case 'baseline_collection':
+        const baselineDevices = data.baselines ? Object.keys(data.baselines) : [];
+        const hasMultiBaseline = baselineDevices.length > 1;
+
         return (
           <div className="space-y-3">
             <div className={cn(
@@ -288,10 +291,42 @@ export function StageDetailModal({
               data.collected ? 'bg-success/10 border-success/20' : 'bg-warning/10 border-warning/20'
             )}>
               <span className="text-sm font-medium">
-                {data.collected ? 'Baseline Collected Successfully' : 'Baseline Collection Skipped'}
+                {data.collected
+                  ? `Baseline Collected from ${hasMultiBaseline ? baselineDevices.length + ' Devices' : '1 Device'}`
+                  : 'Baseline Collection Skipped'}
               </span>
             </div>
-            {data.collected && data.baseline && (
+
+            {/* Multi-device baselines */}
+            {data.collected && hasMultiBaseline && (
+              <div className="space-y-3">
+                {baselineDevices.map((deviceName: string) => {
+                  const deviceBaseline = data.baselines[deviceName];
+                  return (
+                    <div key={deviceName} className="border border-border rounded-lg p-3">
+                      <h5 className="font-medium text-sm mb-2 text-primary">{deviceName}</h5>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="bg-background p-2 rounded">
+                          <span className="text-xs text-text-muted">Neighbors</span>
+                          <p className="font-medium text-sm">{deviceBaseline.ospf_neighbors?.length || 0}</p>
+                        </div>
+                        <div className="bg-background p-2 rounded">
+                          <span className="text-xs text-text-muted">Interfaces</span>
+                          <p className="font-medium text-sm">{deviceBaseline.interfaces?.length || 0}</p>
+                        </div>
+                        <div className="bg-background p-2 rounded">
+                          <span className="text-xs text-text-muted">Routes</span>
+                          <p className="font-medium text-sm">{deviceBaseline.routes?.length || 0}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Single-device baseline (backward compat) */}
+            {data.collected && !hasMultiBaseline && data.baseline && (
               <>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-background p-3 rounded-lg">
@@ -336,17 +371,62 @@ export function StageDetailModal({
         );
 
       case 'cml_deployment':
+        const hasDeviceResults = data.device_results && Object.keys(data.device_results).length > 1;
+
         return (
           <div className="space-y-3">
             <div className={cn(
               'p-3 rounded-lg border',
-              data.deployed ? 'bg-success/10 border-success/20' : 'bg-error/10 border-error/20'
+              data.all_deployed ? 'bg-success/10 border-success/20'
+                : data.deployed ? 'bg-warning/10 border-warning/20'
+                : 'bg-error/10 border-error/20'
             )}>
               <span className="text-sm font-medium">
-                {data.deployed ? 'Successfully Deployed' : 'Deployment Failed'}
+                {data.all_deployed
+                  ? `Successfully Deployed to ${data.devices?.length || 1} Device(s)`
+                  : data.deployed
+                    ? `Partially Deployed (${data.devices?.length || 0} succeeded, ${data.failed_devices?.length || 0} failed)`
+                    : 'Deployment Failed'}
               </span>
             </div>
-            {data.deployed && (
+
+            {/* Per-device results table */}
+            {data.deployed && hasDeviceResults && (
+              <div className="space-y-2">
+                <h4 className="font-medium text-sm text-text-secondary">Per-Device Results</h4>
+                {Object.entries(data.device_results).map(([deviceName, result]: [string, any]) => (
+                  <div
+                    key={deviceName}
+                    className={cn(
+                      'flex items-center justify-between p-2 rounded-lg border',
+                      result.deployed ? 'bg-success/5 border-success/20' : 'bg-error/5 border-error/20'
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      {result.deployed ? (
+                        <CheckCircle2 className="w-4 h-4 text-success" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-error" />
+                      )}
+                      <span className="font-medium text-sm">{deviceName}</span>
+                    </div>
+                    <span className={cn(
+                      'text-xs px-2 py-0.5 rounded',
+                      result.deployed ? 'bg-success/20 text-success' : 'bg-error/20 text-error'
+                    )}>
+                      {result.deployed ? 'Deployed' : result.error || 'Failed'}
+                    </span>
+                  </div>
+                ))}
+                <div className="bg-background p-3 rounded-lg">
+                  <span className="text-xs text-text-muted">Commands Applied (per device)</span>
+                  <p className="font-medium">{data.commands_applied}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Single device display (backward compat) */}
+            {data.deployed && !hasDeviceResults && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-background p-3 rounded-lg">
                   <span className="text-xs text-text-muted">Device</span>
@@ -566,8 +646,13 @@ export function StageDetailModal({
                 <p className="font-medium">{data.wait_seconds}s</p>
               </div>
               <div className="bg-background p-3 rounded-lg">
-                <span className="text-xs text-text-muted">Device Monitored</span>
-                <p className="font-medium">{data.device || 'N/A'}</p>
+                <span className="text-xs text-text-muted">Devices Monitored</span>
+                <p className="font-medium">
+                  {data.devices ? data.devices.length : 1} device(s)
+                </p>
+                {data.devices && data.devices.length > 1 && (
+                  <p className="text-xs text-text-muted mt-1">{data.devices.join(', ')}</p>
+                )}
               </div>
             </div>
 
@@ -622,6 +707,48 @@ export function StageDetailModal({
                       </div>
                     );
                   })}
+              </div>
+            )}
+
+            {/* Per-Device Health Summary */}
+            {data.per_device && Object.keys(data.per_device).length > 1 && (
+              <div className="space-y-2">
+                <h4 className="font-medium text-lg">Per-Device Health</h4>
+                {Object.entries(data.per_device).map(([deviceName, deviceData]: [string, any]) => (
+                  <div
+                    key={deviceName}
+                    className={cn(
+                      'p-3 rounded-lg border flex items-center justify-between',
+                      deviceData.healthy ? 'bg-success/5 border-success/20' : 'bg-error/5 border-error/20'
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      {deviceData.healthy ? (
+                        <CheckCircle2 className="w-4 h-4 text-success" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-error" />
+                      )}
+                      <span className="font-medium text-sm">{deviceName}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className={cn(
+                        deviceData.diff?.ospf_neighbors?.change < 0 ? 'text-error' : 'text-text-muted'
+                      )}>
+                        Neighbors: {deviceData.diff?.ospf_neighbors?.change >= 0 ? '+' : ''}{deviceData.diff?.ospf_neighbors?.change || 0}
+                      </span>
+                      <span className={cn(
+                        deviceData.diff?.interfaces_up?.change < 0 ? 'text-error' : 'text-text-muted'
+                      )}>
+                        Intf: {deviceData.diff?.interfaces_up?.change >= 0 ? '+' : ''}{deviceData.diff?.interfaces_up?.change || 0}
+                      </span>
+                      <span className={cn(
+                        deviceData.diff?.routes?.change < 0 ? 'text-error' : 'text-text-muted'
+                      )}>
+                        Routes: {deviceData.diff?.routes?.change >= 0 ? '+' : ''}{deviceData.diff?.routes?.change || 0}
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -746,17 +873,33 @@ export function StageDetailModal({
             {data.results && data.results.length > 0 && (
               <div className="space-y-2">
                 {data.results.map((result: any, i: number) => (
-                  <div key={i} className="flex items-center gap-2 text-sm">
-                    {result.success ? (
-                      <CheckCircle2 className="w-4 h-4 text-success" />
-                    ) : (
-                      <XCircle className="w-4 h-4 text-error" />
+                  <div key={i} className={cn(
+                    'p-3 rounded-lg border',
+                    result.success ? 'bg-success/10 border-success/20' : 'bg-error/10 border-error/20'
+                  )}>
+                    <div className="flex items-center gap-2 text-sm">
+                      {result.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-success" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-error" />
+                      )}
+                      <span className="capitalize font-medium">{result.channel}</span>
+                      {result.ticket_number && (
+                        <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded font-mono">
+                          {result.ticket_number}
+                        </span>
+                      )}
+                    </div>
+                    {result.reason && (
+                      <p className="text-xs text-text-secondary mt-1 ml-6">{result.reason}</p>
                     )}
-                    <span className="capitalize">{result.channel}</span>
-                    {result.ticket_number && (
-                      <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded font-mono">
-                        {result.ticket_number}
-                      </span>
+                    {!result.success && result.error && (
+                      <p className="text-xs text-error mt-1 ml-6">{result.error}</p>
+                    )}
+                    {result.ticket_link && (
+                      <a href={result.ticket_link} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline mt-1 ml-6 block">
+                        View Ticket
+                      </a>
                     )}
                   </div>
                 ))}

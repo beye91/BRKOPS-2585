@@ -477,20 +477,40 @@ async def rollback_operation(
         )
 
     # Get CML deployment info
-    lab_id = cml_deployment.get("data", {}).get("lab_id")
-    node_id = cml_deployment.get("data", {}).get("node_id")
-    device = cml_deployment.get("data", {}).get("device")
+    deployment_data = cml_deployment.get("data", {})
+    lab_id = deployment_data.get("lab_id")
+    device_results = deployment_data.get("device_results", {})
 
-    if not lab_id or not node_id:
+    # Backward-compat: if no device_results, use old single-device fields
+    if not device_results:
+        node_id = deployment_data.get("node_id")
+        device = deployment_data.get("device")
+        if node_id and device:
+            device_results = {device: {"deployed": True, "node_id": node_id}}
+
+    if not lab_id or not device_results:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing CML deployment information (lab_id or node_id)",
+            detail="Missing CML deployment information (lab_id or device_results)",
+        )
+
+    # Collect devices that were successfully deployed
+    devices_to_rollback = [
+        (label, info.get("node_id"))
+        for label, info in device_results.items()
+        if info.get("deployed") and info.get("node_id")
+    ]
+
+    if not devices_to_rollback:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No successfully deployed devices to rollback",
         )
 
     logger.info(
         "Starting rollback",
         job_id=str(operation_id),
-        device=device,
+        devices=[d[0] for d in devices_to_rollback],
         commands_count=len(rollback_commands),
         reason=rollback.reason,
     )
@@ -510,7 +530,7 @@ async def rollback_operation(
     await manager.broadcast({
         "type": "operation.rollback.started",
         "job_id": str(operation_id),
-        "device": device,
+        "devices": [d[0] for d in devices_to_rollback],
         "commands_count": len(rollback_commands),
     })
 
@@ -524,19 +544,39 @@ async def rollback_operation(
         if not cml_server:
             raise Exception("No active CML server configured")
 
-        # Create CML client and apply rollback config
         client = CMLClient(cml_server.endpoint, cml_server.auth_config)
-
-        # Join commands into config block
         config_block = "\n".join(rollback_commands)
-        result = await client.apply_config(
-            lab_id=lab_id,
-            node_id=node_id,
-            config=config_block,
-            save=True,
-        )
 
-        # Update rollback stage with success
+        # Rollback ALL deployed devices
+        rollback_results = {}
+        rollback_success_count = 0
+        rollback_fail_count = 0
+
+        for device_label, node_id in devices_to_rollback:
+            try:
+                result = await client.apply_config(
+                    lab_id=lab_id,
+                    node_id=node_id,
+                    config=config_block,
+                    save=True,
+                )
+                rollback_results[device_label] = {
+                    "success": True,
+                    "output": result.get("output", ""),
+                }
+                rollback_success_count += 1
+                logger.info("Rollback succeeded for device", device=device_label)
+            except Exception as e:
+                rollback_results[device_label] = {
+                    "success": False,
+                    "error": str(e),
+                }
+                rollback_fail_count += 1
+                logger.error("Rollback failed for device", device=device_label, error=str(e))
+
+        overall_success = rollback_fail_count == 0
+
+        # Update rollback stage
         job.stages_data["rollback"] = {
             "status": "completed",
             "started_at": job.stages_data["rollback"]["started_at"],
@@ -545,43 +585,55 @@ async def rollback_operation(
                 "reason": rollback.reason,
                 "commands": rollback_commands,
                 "commands_executed": len(rollback_commands),
-                "output": result.get("output", ""),
-                "success": True,
+                "success": overall_success,
+                "device_results": rollback_results,
+                "devices_rolled_back": rollback_success_count,
+                "devices_failed": rollback_fail_count,
             },
         }
         await db.commit()
 
+        devices_display = ", ".join(d[0] for d in devices_to_rollback)
+
         logger.info(
-            "Rollback completed successfully",
+            "Rollback completed",
             job_id=str(operation_id),
-            device=device,
+            success=overall_success,
+            rolled_back=rollback_success_count,
+            failed=rollback_fail_count,
         )
 
-        # Broadcast rollback completed event
         await manager.broadcast({
             "type": "operation.rollback.completed",
             "job_id": str(operation_id),
-            "device": device,
-            "success": True,
+            "devices": [d[0] for d in devices_to_rollback],
+            "success": overall_success,
         })
+
+        if not overall_success:
+            failed_names = [label for label, r in rollback_results.items() if not r["success"]]
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Rollback failed on: {', '.join(failed_names)}",
+            )
 
         return RollbackResponse(
             success=True,
-            message=f"Rollback completed successfully on {device}",
+            message=f"Rollback completed successfully on {rollback_success_count} device(s): {devices_display}",
             commands_executed=len(rollback_commands),
-            rollback_output=result.get("output"),
+            rollback_output=str(rollback_results),
         )
 
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
         error_message = str(e)
         logger.error(
             "Rollback failed",
             job_id=str(operation_id),
-            device=device,
             error=error_message,
         )
 
-        # Update rollback stage with failure
         job.stages_data["rollback"] = {
             "status": "failed",
             "started_at": job.stages_data["rollback"]["started_at"],
@@ -595,11 +647,9 @@ async def rollback_operation(
         }
         await db.commit()
 
-        # Broadcast rollback failed event
         await manager.broadcast({
             "type": "operation.rollback.failed",
             "job_id": str(operation_id),
-            "device": device,
             "error": error_message,
         })
 

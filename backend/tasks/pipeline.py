@@ -555,7 +555,83 @@ async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase,
             )
             raise ValueError(error_msg)
 
-    logger.info("Intent parsed and validated", job_id=str(job.id), action=intent.get("action"))
+    # -------------------------------------------------------------------
+    # Device Resolution: expand "all" or validate specific device names
+    # against actual CML lab nodes
+    # -------------------------------------------------------------------
+    raw_targets = intent.get("target_devices", [])
+    if raw_targets:
+        try:
+            from services.device_resolver import resolve_target_devices, is_all_keyword
+
+            # Get CML client + lab_id (same pattern as process_cml_deployment)
+            result = await db.execute(
+                select(MCPServer).where(MCPServer.type == MCPServerType.CML, MCPServer.is_active == True)
+            )
+            cml_server = result.scalar_one_or_none()
+
+            if cml_server:
+                client = CMLClient(cml_server.endpoint, cml_server.auth_config)
+
+                lab_id = use_case.cml_target_lab if use_case else None
+                if not lab_id:
+                    labs = await client.get_labs()
+                    if labs:
+                        lab_id = labs[0].get("id")
+
+                if lab_id:
+                    resolved, errors = await resolve_target_devices(raw_targets, client, lab_id)
+
+                    if not resolved:
+                        # Complete failure: no devices could be resolved
+                        raise ValueError(
+                            f"Could not resolve target devices: {'; '.join(errors)}"
+                        )
+
+                    # Store resolution metadata
+                    intent["_device_resolution"] = {
+                        "raw_targets": raw_targets,
+                        "resolved": resolved,
+                        "errors": errors,
+                        "was_all_keyword": is_all_keyword(raw_targets),
+                    }
+
+                    # Replace target_devices with resolved list
+                    intent["target_devices"] = resolved
+
+                    if errors:
+                        logger.warning(
+                            "Partial device resolution",
+                            job_id=str(job.id),
+                            resolved=resolved,
+                            errors=errors,
+                        )
+                    else:
+                        logger.info(
+                            "Device resolution complete",
+                            job_id=str(job.id),
+                            resolved=resolved,
+                        )
+                else:
+                    logger.warning("No CML lab found for device resolution", job_id=str(job.id))
+            else:
+                logger.warning("No CML server for device resolution", job_id=str(job.id))
+
+        except ValueError:
+            raise  # Re-raise resolution failures
+        except Exception as e:
+            logger.warning(
+                "Device resolution failed, proceeding with raw targets",
+                job_id=str(job.id),
+                error=str(e),
+            )
+
+    logger.info(
+        "Intent parsed and validated",
+        job_id=str(job.id),
+        action=intent.get("action"),
+        target_devices=intent.get("target_devices"),
+    )
 
     return intent
 
@@ -619,7 +695,7 @@ async def process_ai_advice(ctx: dict, job: PipelineJob, use_case: UseCase, db, 
 
 
 async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
-    """Deploy configuration to CML."""
+    """Deploy configuration to CML. Deploys to ALL target devices."""
     logger.info("Deploying to CML", job_id=str(job.id))
 
     # Get MCP server configuration
@@ -648,7 +724,6 @@ async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase,
         lab_id = use_case.cml_target_lab if use_case else None
 
         if not lab_id:
-            # Get first available lab
             labs = await client.get_labs()
             if labs:
                 lab_id = labs[0].get("id")
@@ -656,28 +731,73 @@ async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase,
         if not lab_id:
             return {"deployed": False, "error": "No lab available"}
 
-        # Find target device
+        # Get all target devices
         target_devices = intent.get("target_devices", [])
         if not target_devices:
             return {"deployed": False, "error": "No target devices specified"}
 
-        device_label = target_devices[0]
-        node = await client.find_node_by_label(lab_id, device_label)
-
-        if not node:
-            return {"deployed": False, "error": f"Device {device_label} not found in lab"}
-
-        # Apply configuration
         commands = config.get("commands", [])
         config_text = "\n".join(commands)
 
-        await client.apply_config(lab_id, node["id"], config_text)
+        # Deploy to ALL target devices
+        device_results = {}
+        deployed_devices = []
+        failed_devices = []
+
+        for device_label in target_devices:
+            try:
+                node = await client.find_node_by_label(lab_id, device_label)
+                if not node:
+                    device_results[device_label] = {
+                        "deployed": False,
+                        "error": f"Device {device_label} not found in lab",
+                    }
+                    failed_devices.append(device_label)
+                    continue
+
+                await client.apply_config(lab_id, node["id"], config_text)
+
+                device_results[device_label] = {
+                    "deployed": True,
+                    "node_id": node["id"],
+                }
+                deployed_devices.append(device_label)
+
+                logger.info(
+                    "Config deployed to device",
+                    device=device_label,
+                    node_id=node["id"],
+                    job_id=str(job.id),
+                )
+
+            except Exception as e:
+                logger.error(
+                    "Deployment failed for device",
+                    device=device_label,
+                    error=str(e),
+                    job_id=str(job.id),
+                )
+                device_results[device_label] = {
+                    "deployed": False,
+                    "error": str(e),
+                }
+                failed_devices.append(device_label)
+
+        all_deployed = len(failed_devices) == 0 and len(deployed_devices) > 0
+
+        # Backward-compat: "device" and "node_id" point to first device
+        first_device = target_devices[0]
+        first_result = device_results.get(first_device, {})
 
         return {
-            "deployed": True,
+            "deployed": all_deployed or len(deployed_devices) > 0,
+            "all_deployed": all_deployed,
             "lab_id": lab_id,
-            "node_id": node["id"],
-            "device": device_label,
+            "node_id": first_result.get("node_id"),        # backward-compat
+            "device": first_device,                          # backward-compat
+            "devices": deployed_devices,                     # all deployed
+            "failed_devices": failed_devices,
+            "device_results": device_results,                # per-device detail
             "commands_applied": len(commands),
         }
 
@@ -693,24 +813,32 @@ async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db,
     """
     Monitor network convergence after deployment.
 
-    Collects post-deployment state and compares with baseline to determine
-    if the deployment was successful. The diff helps AI validation assess
-    the change impact.
+    Collects post-deployment state from ALL deployed devices and compares
+    with baseline to determine if the deployment was successful.
     """
     logger.info("Monitoring convergence", job_id=str(job.id))
 
     # Get baseline data from previous stage
     baseline_stage = job.stages_data.get("baseline_collection", {}).get("data", {})
-    baseline = baseline_stage.get("baseline", {})
+    baselines = baseline_stage.get("baselines", {})
+    # Backward-compat fallback
+    if not baselines and baseline_stage.get("baseline"):
+        fallback_device = baseline_stage.get("device", "Router-1")
+        baselines = {fallback_device: baseline_stage["baseline"]}
 
     result = await db.execute(
         select(MCPServer).where(MCPServer.type == MCPServerType.CML, MCPServer.is_active == True)
     )
     cml_server = result.scalar_one_or_none()
 
-    # Get deployment info
+    # Get deployment info - use deployed device list
     deployment = job.stages_data.get("cml_deployment", {}).get("data", {})
-    device_label = deployment.get("device", baseline_stage.get("device", "Router-1"))
+    deployed_devices = deployment.get("devices", [])
+    # Backward-compat fallback
+    if not deployed_devices:
+        fallback_device = deployment.get("device", baseline_stage.get("device", "Router-1"))
+        deployed_devices = [fallback_device]
+
     lab_id = deployment.get("lab_id", baseline_stage.get("lab_id"))
 
     # Get convergence wait time
@@ -718,23 +846,24 @@ async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db,
 
     monitoring_data = {
         "wait_seconds": wait_seconds,
-        "device": device_label,
+        "device": deployed_devices[0] if deployed_devices else "Router-1",  # backward-compat
+        "devices": deployed_devices,
         "checks": [],
         "ospf_neighbors": [],
         "interface_status": [],
         "routes": [],
         "errors": [],
-        "baseline": baseline,
+        "baseline": baselines.get(deployed_devices[0], {}) if deployed_devices else {},  # backward-compat
         "current": {},
         "diff": {},
+        "per_device": {},
     }
 
     if not cml_server or not lab_id:
-        # No CML connection, just wait
         logger.warning("No CML server or lab_id, performing basic wait only")
         await asyncio.sleep(wait_seconds)
         monitoring_data["monitoring_complete"] = True
-        monitoring_data["deployment_healthy"] = None  # Unknown without monitoring
+        monitoring_data["deployment_healthy"] = None
         monitoring_data["checks"].append({
             "name": "Convergence Wait",
             "status": "completed",
@@ -752,7 +881,6 @@ async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db,
             await asyncio.sleep(interval)
             elapsed += interval
 
-            # Broadcast progress
             await manager.broadcast({
                 "type": "monitoring.progress",
                 "job_id": str(job.id),
@@ -761,85 +889,125 @@ async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db,
                 "message": f"Monitoring convergence... {elapsed}/{wait_seconds}s",
             })
 
-        # Collect post-deployment state
-        logger.info("Collecting post-deployment network state", device=device_label)
-        current = await collect_network_state(client, lab_id, device_label)
+        # Collect post-deployment state from ALL deployed devices
+        per_device = {}
+        agg_neighbors_change = 0
+        agg_interfaces_change = 0
+        agg_routes_change = 0
+        agg_neighbors_before = 0
+        agg_neighbors_after = 0
+        agg_interfaces_before = 0
+        agg_interfaces_after = 0
+        agg_routes_before = 0
+        agg_routes_after = 0
+        all_healthy = True
 
-        monitoring_data["current"] = current
-        monitoring_data["ospf_neighbors"] = current.get("ospf_neighbors", [])
-        monitoring_data["ospf_neighbor_count"] = len(current.get("ospf_neighbors", []))
-        monitoring_data["interface_status"] = current.get("interfaces", [])
-        monitoring_data["routes"] = current.get("routes", [])
-        monitoring_data["errors"].extend(current.get("errors", []))
+        for device_label in deployed_devices:
+            logger.info("Collecting post-deployment state", device=device_label)
+            current = await collect_network_state(client, lab_id, device_label)
+            device_baseline = baselines.get(device_label, {})
 
-        # Calculate diff with baseline
-        baseline_neighbors = len(baseline.get("ospf_neighbors", []))
-        current_neighbors = len(current.get("ospf_neighbors", []))
+            # Calculate per-device diff
+            b_neighbors = len(device_baseline.get("ospf_neighbors", []))
+            c_neighbors = len(current.get("ospf_neighbors", []))
+            b_intf_up = count_interfaces_up(device_baseline.get("interfaces", []))
+            c_intf_up = count_interfaces_up(current.get("interfaces", []))
+            b_routes = len(device_baseline.get("routes", []))
+            c_routes = len(current.get("routes", []))
 
-        baseline_interfaces_up = count_interfaces_up(baseline.get("interfaces", []))
-        current_interfaces_up = count_interfaces_up(current.get("interfaces", []))
+            device_diff = {
+                "ospf_neighbors": {"before": b_neighbors, "after": c_neighbors, "change": c_neighbors - b_neighbors},
+                "interfaces_up": {"before": b_intf_up, "after": c_intf_up, "change": c_intf_up - b_intf_up},
+                "routes": {"before": b_routes, "after": c_routes, "change": c_routes - b_routes},
+            }
 
-        baseline_routes = len(baseline.get("routes", []))
-        current_routes = len(current.get("routes", []))
+            device_healthy = (
+                c_neighbors >= b_neighbors
+                and c_intf_up >= b_intf_up
+                and c_routes > 0
+            )
+            if not device_healthy:
+                all_healthy = False
 
+            per_device[device_label] = {
+                "baseline": device_baseline,
+                "current": current,
+                "diff": device_diff,
+                "healthy": device_healthy,
+            }
+
+            # Aggregate totals
+            agg_neighbors_before += b_neighbors
+            agg_neighbors_after += c_neighbors
+            agg_interfaces_before += b_intf_up
+            agg_interfaces_after += c_intf_up
+            agg_routes_before += b_routes
+            agg_routes_after += c_routes
+
+            monitoring_data["errors"].extend(current.get("errors", []))
+
+        # Aggregate diff across all devices
         diff = {
             "ospf_neighbors": {
-                "before": baseline_neighbors,
-                "after": current_neighbors,
-                "change": current_neighbors - baseline_neighbors,
+                "before": agg_neighbors_before,
+                "after": agg_neighbors_after,
+                "change": agg_neighbors_after - agg_neighbors_before,
             },
             "interfaces_up": {
-                "before": baseline_interfaces_up,
-                "after": current_interfaces_up,
-                "change": current_interfaces_up - baseline_interfaces_up,
+                "before": agg_interfaces_before,
+                "after": agg_interfaces_after,
+                "change": agg_interfaces_after - agg_interfaces_before,
             },
             "routes": {
-                "before": baseline_routes,
-                "after": current_routes,
-                "change": current_routes - baseline_routes,
+                "before": agg_routes_before,
+                "after": agg_routes_after,
+                "change": agg_routes_after - agg_routes_before,
             },
         }
         monitoring_data["diff"] = diff
+        monitoring_data["per_device"] = per_device
+        monitoring_data["deployment_healthy"] = all_healthy
 
-        # Determine deployment health based on diff
-        # Healthy if: neighbors didn't decrease, interfaces didn't go down, routes exist
-        deployment_healthy = (
-            diff["ospf_neighbors"]["after"] >= diff["ospf_neighbors"]["before"]
-            and diff["interfaces_up"]["after"] >= diff["interfaces_up"]["before"]
-            and diff["routes"]["after"] > 0
-        )
-        monitoring_data["deployment_healthy"] = deployment_healthy
+        # Backward-compat: first device's data
+        first_device = deployed_devices[0] if deployed_devices else None
+        if first_device and first_device in per_device:
+            first_current = per_device[first_device]["current"]
+            monitoring_data["current"] = first_current
+            monitoring_data["ospf_neighbors"] = first_current.get("ospf_neighbors", [])
+            monitoring_data["ospf_neighbor_count"] = len(first_current.get("ospf_neighbors", []))
+            monitoring_data["interface_status"] = first_current.get("interfaces", [])
+            monitoring_data["routes"] = first_current.get("routes", [])
 
-        # Add checks
+        # Add aggregate checks
         monitoring_data["checks"].append({
-            "name": "OSPF Neighbor Comparison",
+            "name": "OSPF Neighbor Comparison (All Devices)",
             "status": "completed" if diff["ospf_neighbors"]["change"] >= 0 else "warning",
-            "message": f"Neighbors: {baseline_neighbors} → {current_neighbors} ({diff['ospf_neighbors']['change']:+d})",
+            "message": f"Neighbors: {agg_neighbors_before} → {agg_neighbors_after} ({diff['ospf_neighbors']['change']:+d}) across {len(deployed_devices)} device(s)",
             "timestamp": datetime.utcnow().isoformat(),
         })
 
         monitoring_data["checks"].append({
-            "name": "Interface Status Comparison",
+            "name": "Interface Status Comparison (All Devices)",
             "status": "completed" if diff["interfaces_up"]["change"] >= 0 else "warning",
-            "message": f"Interfaces up: {baseline_interfaces_up} → {current_interfaces_up} ({diff['interfaces_up']['change']:+d})",
+            "message": f"Interfaces up: {agg_interfaces_before} → {agg_interfaces_after} ({diff['interfaces_up']['change']:+d}) across {len(deployed_devices)} device(s)",
             "timestamp": datetime.utcnow().isoformat(),
         })
 
         monitoring_data["checks"].append({
-            "name": "OSPF Route Comparison",
+            "name": "OSPF Route Comparison (All Devices)",
             "status": "completed" if diff["routes"]["after"] > 0 else "error",
-            "message": f"OSPF routes: {baseline_routes} → {current_routes} ({diff['routes']['change']:+d})",
+            "message": f"OSPF routes: {agg_routes_before} → {agg_routes_after} ({diff['routes']['change']:+d}) across {len(deployed_devices)} device(s)",
             "timestamp": datetime.utcnow().isoformat(),
         })
 
-        # Final status
         monitoring_data["monitoring_complete"] = True
-        monitoring_data["convergence_detected"] = current_neighbors > 0
+        monitoring_data["convergence_detected"] = agg_neighbors_after > 0
 
         logger.info(
             "Monitoring complete with diff",
             job_id=str(job.id),
-            deployment_healthy=deployment_healthy,
+            deployment_healthy=all_healthy,
+            devices_monitored=len(deployed_devices),
             neighbor_change=diff["ospf_neighbors"]["change"],
             interface_change=diff["interfaces_up"]["change"],
             route_change=diff["routes"]["change"],
@@ -1141,6 +1309,7 @@ async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, 
                 "channel": "servicenow",
                 "success": result.get("success"),
                 "reason": ticket_reason,
+                "error": result.get("error", ""),
                 "enabled": servicenow_enabled,
                 "ticket_number": result.get("response", {}).get("number", ""),
                 "ticket_link": result.get("response", {}).get("link", ""),
@@ -1179,6 +1348,8 @@ async def process_baseline_collection(ctx: dict, job: PipelineJob, use_case: Use
     This stage runs after human approval but BEFORE CML deployment.
     It captures the current state of OSPF neighbors, interfaces, and routes
     so we can compare after deployment to determine if the change was successful.
+
+    Collects from ALL target_devices, not just the first one.
     """
     logger.info("Collecting baseline network state", job_id=str(job.id))
 
@@ -1192,14 +1363,16 @@ async def process_baseline_collection(ctx: dict, job: PipelineJob, use_case: Use
         logger.warning("No CML server configured for baseline collection", job_id=str(job.id))
         return {
             "baseline": {},
+            "baselines": {},
             "error": "No CML server configured",
             "collected": False,
         }
 
-    # Get target device from intent parsing
+    # Get target devices from intent parsing
     intent = job.stages_data.get("intent_parsing", {}).get("data", {})
     target_devices = intent.get("target_devices", [])
-    device_label = target_devices[0] if target_devices else "Router-1"
+    if not target_devices:
+        target_devices = ["Router-1"]
 
     # Get lab ID from use case or find the first available lab
     lab_id = use_case.cml_target_lab if use_case else None
@@ -1208,7 +1381,6 @@ async def process_baseline_collection(ctx: dict, job: PipelineJob, use_case: Use
         client = CMLClient(cml_server.endpoint, cml_server.auth_config)
 
         if not lab_id:
-            # Get first available lab
             labs = await client.get_labs()
             if labs:
                 lab_id = labs[0].get("id")
@@ -1216,34 +1388,45 @@ async def process_baseline_collection(ctx: dict, job: PipelineJob, use_case: Use
         if not lab_id:
             return {
                 "baseline": {},
+                "baselines": {},
                 "error": "No lab available for baseline collection",
                 "collected": False,
             }
 
-        # Collect baseline state
-        baseline = await collect_network_state(client, lab_id, device_label)
-        baseline["lab_id"] = lab_id
-        baseline["device"] = device_label
+        # Collect baseline state from ALL target devices
+        baselines = {}
+        for device_label in target_devices:
+            logger.info("Collecting baseline for device", device=device_label, job_id=str(job.id))
+            baseline = await collect_network_state(client, lab_id, device_label)
+            baseline["lab_id"] = lab_id
+            baseline["device"] = device_label
+            baselines[device_label] = baseline
+
+        # Backward-compat: "baseline" and "device" point to first device
+        first_device = target_devices[0]
+        first_baseline = baselines.get(first_device, {})
 
         logger.info(
             "Baseline collection complete",
             job_id=str(job.id),
-            ospf_neighbors=len(baseline.get("ospf_neighbors", [])),
-            interfaces=len(baseline.get("interfaces", [])),
-            routes=len(baseline.get("routes", [])),
+            devices=list(baselines.keys()),
+            device_count=len(baselines),
         )
 
         return {
-            "baseline": baseline,
+            "baseline": first_baseline,       # backward-compat: first device
+            "baselines": baselines,            # all devices
             "collected": True,
             "lab_id": lab_id,
-            "device": device_label,
+            "device": first_device,            # backward-compat
+            "devices": target_devices,         # all device labels
         }
 
     except Exception as e:
         logger.error("Baseline collection failed", job_id=str(job.id), error=str(e))
         return {
             "baseline": {},
+            "baselines": {},
             "error": str(e),
             "collected": False,
         }

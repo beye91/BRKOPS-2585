@@ -221,31 +221,52 @@ class LLMService:
         transcript_lower = transcript.lower()
 
         if "ospf" in transcript_lower and "area" in transcript_lower:
-            # Extract router and area from transcript
-            router = "Router-1"
-            area = "10"
-            if "router-2" in transcript_lower:
-                router = "Router-2"
-            if "router-3" in transcript_lower:
-                router = "Router-3"
-            if "router-4" in transcript_lower:
-                router = "Router-4"
-
             import re
+
+            # Detect "all routers" / "all devices" patterns
+            all_pattern = re.search(
+                r'\b(all\s+(routers?|devices?|of\s+them|network\s+devices?)|every\s+(router|device))\b',
+                transcript_lower
+            )
+
+            if all_pattern:
+                # "all" keyword - will be resolved to actual devices by device_resolver
+                target_devices = ["all"]
+                target_desc = "all routers"
+            else:
+                # Extract specific router names (e.g. "Router-1 and Router-3", "Router-2")
+                router_matches = re.findall(r'router[-\s]?(\d+)', transcript_lower)
+                if router_matches:
+                    target_devices = [f"Router-{num}" for num in router_matches]
+                    # Remove duplicates while preserving order
+                    seen = set()
+                    unique_devices = []
+                    for d in target_devices:
+                        if d not in seen:
+                            seen.add(d)
+                            unique_devices.append(d)
+                    target_devices = unique_devices
+                else:
+                    # Default to Router-1 if no device specified
+                    target_devices = ["Router-1"]
+
+                target_desc = ", ".join(target_devices)
+
+            area = "10"
             area_match = re.search(r'area\s*(\d+)', transcript_lower)
             if area_match:
                 area = area_match.group(1)
 
             return {
                 "action": "modify_ospf_area",
-                "target_devices": [router],
+                "target_devices": target_devices,
                 "parameters": {
                     "ospf_process_id": 1,
                     "new_area": int(area),
                     "interfaces": ["GigabitEthernet2", "GigabitEthernet3", "GigabitEthernet4"]
                 },
                 "confidence": 95,
-                "reasoning": f"User wants to change OSPF configuration on {router} to use area {area}"
+                "reasoning": f"User wants to change OSPF configuration on {target_desc} to use area {area}"
             }
 
         elif "credential" in transcript_lower or "password" in transcript_lower:

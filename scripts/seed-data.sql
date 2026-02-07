@@ -101,6 +101,11 @@ Extract the following information:
 3. Parameters: area_id, network_address, wildcard_mask, process_id
 4. Confidence score (0-100)
 
+IMPORTANT - Target Device Rules:
+- If the user says "all routers", "all devices", "every router", or similar: set target_devices to ["all"]
+- If the user names specific routers (e.g. "Router-1 and Router-3"): list each one, e.g. ["Router-1", "Router-3"]
+- If no device is mentioned: default to ["Router-1"]
+
 Respond in JSON format:
 {
     "action": "string",
@@ -164,9 +169,9 @@ Provide analysis in JSON format:
 }',
     '{
         "webex": {
-            "success": "Configuration applied successfully to {{devices}}. OSPF area changed to {{area_id}}. Network is stable.",
-            "warning": "Configuration applied but issues detected: {{issues}}. Recommend reviewing before production deployment.",
-            "critical": "ALERT: Configuration caused network issues! {{issues}}. Immediate attention required."
+            "success": "✅ **BRKOPS-2585** | Configuration applied successfully to **{{devices}}**. OSPF area changed to {{area_id}}. Network is stable.\n\n**AI Assessment:** {{recommendation}}",
+            "warning": "⚠️ **BRKOPS-2585** | Configuration applied but issues detected on **{{devices}}**:\n\n{{issues}}\n\n**AI Recommendation:** {{recommendation}}",
+            "critical": "🚨 **BRKOPS-2585 CRITICAL** | Configuration caused network issues on **{{devices}}**!\n\n**Issues Found:**\n{{issues}}\n\n**AI Recommendation:** {{recommendation}}\n\n**Action Required:** {{rollback_action}}"
         },
         "servicenow": {
             "short_description": "OSPF Configuration Change - {{devices}}",
@@ -188,7 +193,8 @@ Provide analysis in JSON format:
     description = EXCLUDED.description,
     intent_prompt = EXCLUDED.intent_prompt,
     config_prompt = EXCLUDED.config_prompt,
-    analysis_prompt = EXCLUDED.analysis_prompt;
+    analysis_prompt = EXCLUDED.analysis_prompt,
+    notification_template = EXCLUDED.notification_template;
 
 -- Use Case 2: Credential Rotation
 INSERT INTO use_cases (
@@ -276,9 +282,9 @@ Respond in JSON format:
 }',
     '{
         "webex": {
-            "success": "Credential rotation completed on {{count}} devices. All authentications verified.",
-            "warning": "Credential rotation completed with warnings: {{warnings}}",
-            "critical": "Credential rotation failed on {{failed_count}} devices. Manual intervention required."
+            "success": "✅ **BRKOPS-2585** | Credential rotation completed on {{count}} devices. All authentications verified.\n\n**AI Assessment:** {{recommendation}}",
+            "warning": "⚠️ **BRKOPS-2585** | Credential rotation completed with warnings:\n\n{{issues}}\n\n**AI Recommendation:** {{recommendation}}",
+            "critical": "🚨 **BRKOPS-2585 CRITICAL** | Credential rotation failed on {{failed_count}} devices!\n\n**Issues Found:**\n{{issues}}\n\n**AI Recommendation:** {{recommendation}}\n\n**Action Required:** {{rollback_action}}"
         },
         "servicenow": {
             "short_description": "Credential Rotation - {{scope}}",
@@ -297,7 +303,8 @@ Respond in JSON format:
     2
 ) ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
-    description = EXCLUDED.description;
+    description = EXCLUDED.description,
+    notification_template = EXCLUDED.notification_template;
 
 -- Use Case 3: Security Advisory Response
 INSERT INTO use_cases (
@@ -385,9 +392,9 @@ Respond in JSON format:
 }',
     '{
         "webex": {
-            "success": "Security remediation for {{advisory_id}} completed on {{count}} devices.",
-            "warning": "Security remediation partially completed. {{pending_count}} devices pending.",
-            "critical": "URGENT: Security remediation failed. {{exposed_count}} devices still vulnerable."
+            "success": "✅ **BRKOPS-2585** | Security remediation for {{advisory_id}} completed on {{count}} devices.\n\n**AI Assessment:** {{recommendation}}",
+            "warning": "⚠️ **BRKOPS-2585** | Security remediation partially completed. {{pending_count}} devices pending.\n\n{{issues}}\n\n**AI Recommendation:** {{recommendation}}",
+            "critical": "🚨 **BRKOPS-2585 CRITICAL** | Security remediation failed. {{exposed_count}} devices still vulnerable!\n\n**Issues Found:**\n{{issues}}\n\n**AI Recommendation:** {{recommendation}}\n\n**Action Required:** {{rollback_action}}"
         },
         "servicenow": {
             "short_description": "Security Advisory {{advisory_id}} - Remediation",
@@ -406,7 +413,8 @@ Respond in JSON format:
     3
 ) ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
-    description = EXCLUDED.description;
+    description = EXCLUDED.description,
+    notification_template = EXCLUDED.notification_template;
 
 -- =============================================================================
 -- Default MCP Server Entries for dCloud deployment
