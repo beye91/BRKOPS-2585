@@ -132,7 +132,7 @@ export function LogStream({ logs, operationStatus, operationStage }: LogStreamPr
       {/* Log Entries */}
       <div
         ref={parentRef}
-        className="h-[400px] overflow-auto"
+        className="h-[600px] overflow-auto"
         style={{ contain: 'strict' }}
       >
         {filteredLogs.length === 0 ? (
@@ -192,7 +192,14 @@ export function LogStream({ logs, operationStatus, operationStage }: LogStreamPr
                       <div className="flex items-center gap-2 mb-1">
                         {log._time && (
                           <span className="text-xs text-text-muted font-mono">
-                            {new Date(log._time).toLocaleTimeString()}
+                            {(() => {
+                              const t = Number(log._time);
+                              if (!isNaN(t) && t > 1e9 && t < 1e12) {
+                                return new Date(t * 1000).toLocaleTimeString();
+                              }
+                              const d = new Date(log._time);
+                              return isNaN(d.getTime()) ? '' : d.toLocaleTimeString();
+                            })()}
                           </span>
                         )}
                         {log.host && (

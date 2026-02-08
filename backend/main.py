@@ -39,6 +39,62 @@ structlog.configure(
 logger = structlog.get_logger()
 
 
+async def sync_mcp_credentials_from_env():
+    """
+    Sync MCP server credentials from environment variables into the database.
+
+    This ensures that tokens/passwords set via environment variables (e.g. .env.dcloud)
+    are always applied to the database, even after a DB re-seed that inserts empty defaults.
+    Credentials configured via the Admin UI are stored in the DB and take precedence,
+    but if the DB has empty credentials and env vars have values, the env vars are applied.
+    """
+    from sqlalchemy import select, update
+    from db.database import async_session
+    from db.models import MCPServer
+
+    async with async_session() as db:
+        # Sync Splunk token from env
+        if settings.splunk_token and settings.splunk_host:
+            result = await db.execute(
+                select(MCPServer).where(MCPServer.type == 'splunk')
+            )
+            splunk_server = result.scalar_one_or_none()
+            if splunk_server:
+                current_token = (splunk_server.auth_config or {}).get("token", "")
+                if not current_token:
+                    # DB has empty token but env has one - sync it
+                    new_auth = {
+                        "host": settings.splunk_host,
+                        "token": settings.splunk_token,
+                    }
+                    splunk_server.auth_config = new_auth
+                    if settings.splunk_mcp_url:
+                        splunk_server.endpoint = settings.splunk_mcp_url
+                    splunk_server.is_active = True
+                    await db.commit()
+                    logger.info("Synced Splunk credentials from environment to database")
+
+        # Sync CML credentials from env
+        if settings.cml_host and settings.cml_username:
+            result = await db.execute(
+                select(MCPServer).where(MCPServer.type == 'cml')
+            )
+            cml_server = result.scalar_one_or_none()
+            if cml_server:
+                current_password = (cml_server.auth_config or {}).get("password", "")
+                if not current_password:
+                    new_auth = {
+                        "host": settings.cml_host,
+                        "username": settings.cml_username,
+                        "password": settings.cml_password,
+                    }
+                    cml_server.auth_config = new_auth
+                    if settings.cml_mcp_url:
+                        cml_server.endpoint = settings.cml_mcp_url
+                    await db.commit()
+                    logger.info("Synced CML credentials from environment to database")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     """Application lifespan manager for startup/shutdown."""
@@ -48,6 +104,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Initialize database
     await init_db()
     logger.info("Database initialized")
+
+    # Sync MCP credentials from environment into DB
+    await sync_mcp_credentials_from_env()
 
     yield
 

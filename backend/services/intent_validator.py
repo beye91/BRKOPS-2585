@@ -7,7 +7,7 @@ being processed through the pipeline.
 """
 
 from typing import Dict, Tuple, Optional
-from backend.db.models import UseCase
+from db.models import UseCase
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -73,10 +73,13 @@ def validate_intent_scope(intent: Dict, use_case: UseCase) -> Tuple[bool, Option
         )
         return True, None
 
-    # Validation failed - construct helpful error message
+    # Validation failed - construct user-friendly error message
+    allowed_display = ', '.join(kw.upper() for kw in allowed)
     error_message = (
-        f"Request scope mismatch: '{action}' is not allowed for use case '{use_case.display_name}'. "
-        f"This use case only supports: {', '.join(allowed)}"
+        f"Out of scope: Your request \"{action.replace('_', ' ')}\" doesn't match the selected use case "
+        f"\"{use_case.display_name}\". "
+        f"This use case only handles: {allowed_display}. "
+        f"Please select a different use case or modify your request."
     )
 
     logger.warning(

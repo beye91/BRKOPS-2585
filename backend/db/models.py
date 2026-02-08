@@ -199,6 +199,13 @@ class UseCase(Base):
     scope_validation_enabled = Column(Boolean, default=True)
     llm_provider = Column(String(50), nullable=True)  # 'openai', 'anthropic', or NULL for global default
     llm_model = Column(String(100), nullable=True)  # specific model name, or NULL for global default
+    # Dynamic pipeline configuration (replaces hardcoded branching)
+    explanation_template = Column(Text, default='Configuration change on {{device_count}} device(s)')
+    impact_description = Column(Text, default='Minimal impact expected')
+    splunk_query_config = Column(JSONB, default={"query_type": "general"})
+    pre_checks = Column(JSONB, default=["Validate configuration syntax"])
+    post_checks = Column(JSONB, default=["Verify device reachability", "Confirm expected state"])
+    risk_profile = Column(JSONB, default={"risk_factors": ["Configuration change"], "mitigation_steps": ["Review carefully before approval"], "affected_services": ["Network services"]})
     is_active = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

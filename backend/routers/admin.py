@@ -215,27 +215,7 @@ async def list_use_cases(
     result = await db.execute(query)
     use_cases = result.scalars().all()
 
-    return [
-        UseCaseResponse(
-            id=uc.id,
-            name=uc.name,
-            display_name=uc.display_name,
-            description=uc.description,
-            trigger_keywords=uc.trigger_keywords or [],
-            intent_prompt=uc.intent_prompt,
-            config_prompt=uc.config_prompt,
-            analysis_prompt=uc.analysis_prompt,
-            notification_template=uc.notification_template or {},
-            cml_target_lab=uc.cml_target_lab,
-            splunk_index=uc.splunk_index,
-            convergence_wait_seconds=uc.convergence_wait_seconds,
-            is_active=uc.is_active,
-            sort_order=uc.sort_order,
-            created_at=uc.created_at,
-            updated_at=uc.updated_at,
-        )
-        for uc in use_cases
-    ]
+    return [UseCaseResponse.model_validate(uc) for uc in use_cases]
 
 
 @router.get("/use-cases/{use_case_id}", response_model=UseCaseResponse)
@@ -253,24 +233,7 @@ async def get_use_case(
             detail=f"Use case {use_case_id} not found",
         )
 
-    return UseCaseResponse(
-        id=uc.id,
-        name=uc.name,
-        display_name=uc.display_name,
-        description=uc.description,
-        trigger_keywords=uc.trigger_keywords or [],
-        intent_prompt=uc.intent_prompt,
-        config_prompt=uc.config_prompt,
-        analysis_prompt=uc.analysis_prompt,
-        notification_template=uc.notification_template or {},
-        cml_target_lab=uc.cml_target_lab,
-        splunk_index=uc.splunk_index,
-        convergence_wait_seconds=uc.convergence_wait_seconds,
-        is_active=uc.is_active,
-        sort_order=uc.sort_order,
-        created_at=uc.created_at,
-        updated_at=uc.updated_at,
-    )
+    return UseCaseResponse.model_validate(uc)
 
 
 @router.post("/use-cases", response_model=UseCaseResponse, status_code=status.HTTP_201_CREATED)
@@ -301,6 +264,17 @@ async def create_use_case(
         cml_target_lab=use_case.cml_target_lab,
         splunk_index=use_case.splunk_index,
         convergence_wait_seconds=use_case.convergence_wait_seconds,
+        servicenow_enabled=use_case.servicenow_enabled,
+        allowed_actions=use_case.allowed_actions,
+        scope_validation_enabled=use_case.scope_validation_enabled,
+        llm_provider=use_case.llm_provider,
+        llm_model=use_case.llm_model,
+        explanation_template=use_case.explanation_template,
+        impact_description=use_case.impact_description,
+        splunk_query_config=use_case.splunk_query_config,
+        pre_checks=use_case.pre_checks,
+        post_checks=use_case.post_checks,
+        risk_profile=use_case.risk_profile,
         is_active=use_case.is_active,
         sort_order=use_case.sort_order,
     )
@@ -311,24 +285,7 @@ async def create_use_case(
 
     logger.info("Use case created", name=use_case.name)
 
-    return UseCaseResponse(
-        id=uc.id,
-        name=uc.name,
-        display_name=uc.display_name,
-        description=uc.description,
-        trigger_keywords=uc.trigger_keywords or [],
-        intent_prompt=uc.intent_prompt,
-        config_prompt=uc.config_prompt,
-        analysis_prompt=uc.analysis_prompt,
-        notification_template=uc.notification_template or {},
-        cml_target_lab=uc.cml_target_lab,
-        splunk_index=uc.splunk_index,
-        convergence_wait_seconds=uc.convergence_wait_seconds,
-        is_active=uc.is_active,
-        sort_order=uc.sort_order,
-        created_at=uc.created_at,
-        updated_at=uc.updated_at,
-    )
+    return UseCaseResponse.model_validate(uc)
 
 
 @router.put("/use-cases/{use_case_id}", response_model=UseCaseResponse)
@@ -367,6 +324,18 @@ async def update_use_case(
         uc.splunk_index = update.splunk_index
     if update.convergence_wait_seconds is not None:
         uc.convergence_wait_seconds = update.convergence_wait_seconds
+    if update.explanation_template is not None:
+        uc.explanation_template = update.explanation_template
+    if update.impact_description is not None:
+        uc.impact_description = update.impact_description
+    if update.splunk_query_config is not None:
+        uc.splunk_query_config = update.splunk_query_config
+    if update.pre_checks is not None:
+        uc.pre_checks = update.pre_checks
+    if update.post_checks is not None:
+        uc.post_checks = update.post_checks
+    if update.risk_profile is not None:
+        uc.risk_profile = update.risk_profile
     if update.is_active is not None:
         uc.is_active = update.is_active
     if update.sort_order is not None:
@@ -377,24 +346,7 @@ async def update_use_case(
 
     logger.info("Use case updated", id=use_case_id)
 
-    return UseCaseResponse(
-        id=uc.id,
-        name=uc.name,
-        display_name=uc.display_name,
-        description=uc.description,
-        trigger_keywords=uc.trigger_keywords or [],
-        intent_prompt=uc.intent_prompt,
-        config_prompt=uc.config_prompt,
-        analysis_prompt=uc.analysis_prompt,
-        notification_template=uc.notification_template or {},
-        cml_target_lab=uc.cml_target_lab,
-        splunk_index=uc.splunk_index,
-        convergence_wait_seconds=uc.convergence_wait_seconds,
-        is_active=uc.is_active,
-        sort_order=uc.sort_order,
-        created_at=uc.created_at,
-        updated_at=uc.updated_at,
-    )
+    return UseCaseResponse.model_validate(uc)
 
 
 @router.delete("/use-cases/{use_case_id}")

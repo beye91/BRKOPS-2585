@@ -59,6 +59,9 @@ export const mcpApi = {
   updateServer: (id: number, data: any) =>
     api.put(`/mcp/servers/${id}`, data),
 
+  deleteServer: (id: number) =>
+    api.delete(`/mcp/servers/${id}`),
+
   testServer: (id: number) =>
     api.post(`/mcp/servers/${id}/test`),
 

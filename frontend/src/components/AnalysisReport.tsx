@@ -13,8 +13,12 @@ import {
 import { cn, getSeverityColor } from '@/lib/utils';
 
 interface Finding {
-  type: string;
-  description: string;
+  type?: string;
+  description?: string;
+  category?: string;
+  message?: string;
+  status?: string;
+  severity?: string;
   affected_devices?: string[];
   evidence?: string;
 }
@@ -43,6 +47,20 @@ interface AnalysisReportProps {
 }
 
 export function AnalysisReport({ analysis, config, operationStatus, operationStage }: AnalysisReportProps) {
+  // Derive effective severity from both severity and validation_status fields
+  const effectiveSeverity = (() => {
+    if (!analysis) return 'INFO';
+    const s = analysis.severity?.toUpperCase();
+    if (s === 'CRITICAL' || s === 'WARNING') return s;
+    // Fall back to validation_status mapping
+    const vs = (analysis as any).validation_status?.toUpperCase();
+    if (vs === 'FAILED' || vs === 'ROLLBACK_REQUIRED') return 'CRITICAL';
+    if (vs === 'WARNING') return 'WARNING';
+    // Check rollback_recommended
+    if ((analysis as any).rollback_recommended) return 'CRITICAL';
+    return s || 'INFO';
+  })();
+
   if (!analysis && !config) {
     return (
       <div className="bg-background-elevated rounded-xl border border-border p-8 text-center">
@@ -93,22 +111,22 @@ export function AnalysisReport({ analysis, config, operationStatus, operationSta
           animate={{ opacity: 1, y: 0 }}
           className={cn(
             'p-4 rounded-xl border flex items-center gap-4',
-            analysis.severity === 'CRITICAL' && 'bg-error/10 border-error',
-            analysis.severity === 'WARNING' && 'bg-warning/10 border-warning',
-            analysis.severity === 'INFO' && 'bg-success/10 border-success'
+            effectiveSeverity === 'CRITICAL' && 'bg-error/10 border-error',
+            effectiveSeverity === 'WARNING' && 'bg-warning/10 border-warning',
+            effectiveSeverity !== 'CRITICAL' && effectiveSeverity !== 'WARNING' && 'bg-success/10 border-success'
           )}
         >
-          {getSeverityIcon(analysis.severity)}
+          {getSeverityIcon(effectiveSeverity)}
           <div>
             <h3 className="font-semibold">
-              {analysis.severity === 'CRITICAL'
+              {effectiveSeverity === 'CRITICAL'
                 ? 'Critical Issues Detected'
-                : analysis.severity === 'WARNING'
+                : effectiveSeverity === 'WARNING'
                 ? 'Warnings Found'
                 : 'Analysis Complete - No Issues'}
             </h3>
             <p className="text-sm text-text-secondary">
-              {analysis.requires_action
+              {(analysis.requires_action || effectiveSeverity === 'CRITICAL')
                 ? 'Immediate action may be required'
                 : 'No immediate action needed'}
             </p>
@@ -136,14 +154,14 @@ export function AnalysisReport({ analysis, config, operationStatus, operationSta
                   <div
                     className={cn(
                       'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold',
-                      getSeverityColor(analysis.severity)
+                      getSeverityColor(finding.severity?.toUpperCase() || effectiveSeverity)
                     )}
                   >
                     {index + 1}
                   </div>
                   <div className="flex-1">
-                    <h4 className="font-medium mb-1">{finding.type}</h4>
-                    <p className="text-sm text-text-secondary">{finding.description}</p>
+                    <h4 className="font-medium mb-1">{finding.type || finding.category}</h4>
+                    <p className="text-sm text-text-secondary">{finding.description || finding.message}</p>
                     {finding.affected_devices && finding.affected_devices.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {finding.affected_devices.map((device) => (

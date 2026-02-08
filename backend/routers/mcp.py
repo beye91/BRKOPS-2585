@@ -74,6 +74,19 @@ async def create_mcp_server(
             detail=f"Invalid server type: {server_data.type}. Must be: cml, splunk, or custom",
         )
 
+    # Check for duplicate name + type combination
+    existing = await db.execute(
+        select(MCPServer).where(
+            MCPServer.name == server_data.name,
+            MCPServer.type == server_type,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"MCP server '{server_data.name}' of type '{server_type}' already exists",
+        )
+
     server = MCPServer(
         name=server_data.name,
         type=server_type,
@@ -169,6 +182,30 @@ async def update_mcp_server(
         available_tools=server.available_tools or [],
         created_at=server.created_at,
     )
+
+
+@router.delete("/servers/{server_id}", status_code=status.HTTP_200_OK)
+async def delete_mcp_server(
+    server_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete an MCP server from the registry."""
+    result = await db.execute(select(MCPServer).where(MCPServer.id == server_id))
+    server = result.scalar_one_or_none()
+
+    if not server:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"MCP server {server_id} not found",
+        )
+
+    server_name = server.name
+    await db.delete(server)
+    await db.commit()
+
+    logger.info("MCP server deleted", id=server_id, name=server_name)
+
+    return {"success": True, "message": f"MCP server '{server_name}' deleted"}
 
 
 @router.post("/servers/{server_id}/test")

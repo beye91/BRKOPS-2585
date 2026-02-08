@@ -8,7 +8,7 @@ import re
 import secrets
 import string
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import structlog
 
@@ -646,3 +646,65 @@ def build_security_acl(
             )
 
     return result
+
+
+# =============================================================================
+# Builder Registry - Dynamic dispatch for config generation
+# =============================================================================
+
+def _build_ospf(parsed: ParsedConfig, params: dict) -> ConfigChangeResult:
+    """Wrapper for OSPF area change builder."""
+    return build_ospf_area_change(
+        parsed,
+        new_area=params.get("new_area", 10),
+        ospf_process_id=params.get("ospf_process_id"),
+    )
+
+
+def _build_credentials(parsed: ParsedConfig, params: dict) -> ConfigChangeResult:
+    """Wrapper for credential rotation builder."""
+    return build_credential_rotation(
+        parsed,
+        new_password=params.get("new_password"),
+        username=params.get("username", "admin"),
+    )
+
+
+def _build_security(parsed: ParsedConfig, params: dict) -> ConfigChangeResult:
+    """Wrapper for security ACL builder."""
+    cve_id = params.get("cve_id", "SEC")
+    acl_name = f"{cve_id}-BLOCK"
+    rules = params.get("acl_rules", [
+        {"action": "deny", "protocol": "tcp", "source": "any", "destination": "any eq 445", "extras": "log"},
+        {"action": "deny", "protocol": "udp", "source": "any", "destination": "any eq 445", "extras": "log"},
+    ])
+    return build_security_acl(parsed, acl_name=acl_name, rules=rules)
+
+
+BUILDER_REGISTRY: Dict[str, Callable[[ParsedConfig, dict], ConfigChangeResult]] = {
+    "modify_ospf_area": _build_ospf,
+    "modify_ospf_config": _build_ospf,
+    "change_area": _build_ospf,
+    "ospf_configuration_change": _build_ospf,
+    "rotate_credentials": _build_credentials,
+    "credential_rotation": _build_credentials,
+    "apply_security_patch": _build_security,
+    "security_remediation": _build_security,
+    "security_advisory": _build_security,
+}
+
+
+def build_config_for_action(action: str, parsed: ParsedConfig, params: dict) -> Optional[ConfigChangeResult]:
+    """
+    Registry dispatch. Returns None if no builder registered (LLM fallback).
+
+    Args:
+        action: Action name from intent parsing
+        parsed: Parsed running config
+        params: Parameters from intent
+
+    Returns:
+        ConfigChangeResult or None if no builder matches
+    """
+    builder = BUILDER_REGISTRY.get(action.lower())
+    return builder(parsed, params) if builder else None

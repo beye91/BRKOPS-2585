@@ -75,6 +75,12 @@ class UseCaseCreate(BaseModel):
     scope_validation_enabled: bool = Field(True, description="Enable scope validation")
     llm_provider: Optional[str] = Field(None, description="LLM provider override (openai, anthropic, or null for global default)")
     llm_model: Optional[str] = Field(None, description="LLM model override (e.g., gpt-4-turbo-preview, claude-3-sonnet-20240229)")
+    explanation_template: Optional[str] = Field(None, description="Template for config explanation. Use {{device_count}}, {{new_area}}, etc.")
+    impact_description: Optional[str] = Field(None, description="Human-readable estimated impact")
+    splunk_query_config: Optional[Dict[str, Any]] = Field(None, description="Splunk query routing config, e.g. {\"query_type\": \"ospf_events\"}")
+    pre_checks: Optional[List[str]] = Field(None, description="Pre-deployment checks")
+    post_checks: Optional[List[str]] = Field(None, description="Post-deployment checks")
+    risk_profile: Optional[Dict[str, Any]] = Field(None, description="Risk factors, mitigation steps, and affected services")
     is_active: bool = Field(True, description="Whether use case is active")
     sort_order: int = Field(0, description="Display sort order")
 
@@ -89,6 +95,10 @@ class UseCaseCreate(BaseModel):
                 "config_prompt": "Generate Cisco IOS commands...",
                 "analysis_prompt": "Analyze Splunk results...",
                 "convergence_wait_seconds": 45,
+                "explanation_template": "Change OSPF area to {{new_area}} on {{device_count}} device(s)",
+                "impact_description": "Brief OSPF neighbor flap during area transition",
+                "pre_checks": ["Verify OSPF neighbor state"],
+                "post_checks": ["Check routing table convergence"],
             }
         }
 
@@ -111,6 +121,12 @@ class UseCaseUpdate(BaseModel):
     scope_validation_enabled: Optional[bool] = None
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
+    explanation_template: Optional[str] = None
+    impact_description: Optional[str] = None
+    splunk_query_config: Optional[Dict[str, Any]] = None
+    pre_checks: Optional[List[str]] = None
+    post_checks: Optional[List[str]] = None
+    risk_profile: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
 
@@ -135,6 +151,12 @@ class UseCaseResponse(BaseModel):
     scope_validation_enabled: bool = True
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
+    explanation_template: Optional[str] = None
+    impact_description: Optional[str] = None
+    splunk_query_config: Optional[Dict[str, Any]] = None
+    pre_checks: Optional[List[str]] = None
+    post_checks: Optional[List[str]] = None
+    risk_profile: Optional[Dict[str, Any]] = None
     is_active: bool
     sort_order: int
     created_at: datetime

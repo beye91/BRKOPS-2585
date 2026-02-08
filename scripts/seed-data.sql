@@ -84,6 +84,12 @@ INSERT INTO use_cases (
     scope_validation_enabled,
     llm_provider,
     llm_model,
+    explanation_template,
+    impact_description,
+    splunk_query_config,
+    pre_checks,
+    post_checks,
+    risk_profile,
     is_active,
     sort_order
 ) VALUES (
@@ -182,10 +188,16 @@ Provide analysis in JSON format:
     }',
     45,
     true,
-    ARRAY['ospf', 'routing', 'modify_ospf_area', 'change_area', 'add_network', 'remove_network'],
+    ARRAY['modify_ospf_area', 'modify_ospf_config', 'change_area'],
     true,
     NULL,
     NULL,
+    'Change OSPF area to {{new_area}} on {{device_count}} device(s)',
+    'Brief OSPF neighbor flap during area transition',
+    '{"query_type": "ospf_events"}',
+    '["Verify current OSPF neighbor state on all target devices", "Confirm no active maintenance on affected devices", "Review per-device rollback commands"]',
+    '["Verify OSPF neighbors re-establish", "Check routing table convergence", "Confirm no routing loops"]',
+    '{"risk_factors": ["OSPF area change causes temporary neighbor adjacency reset"], "mitigation_steps": ["Ensure backup paths exist", "Apply during maintenance window", "Per-device rollback ready"], "affected_services": ["OSPF routing", "Inter-area traffic"]}',
     true,
     1
 ) ON CONFLICT (name) DO UPDATE SET
@@ -194,7 +206,14 @@ Provide analysis in JSON format:
     intent_prompt = EXCLUDED.intent_prompt,
     config_prompt = EXCLUDED.config_prompt,
     analysis_prompt = EXCLUDED.analysis_prompt,
-    notification_template = EXCLUDED.notification_template;
+    notification_template = EXCLUDED.notification_template,
+    allowed_actions = EXCLUDED.allowed_actions,
+    explanation_template = EXCLUDED.explanation_template,
+    impact_description = EXCLUDED.impact_description,
+    splunk_query_config = EXCLUDED.splunk_query_config,
+    pre_checks = EXCLUDED.pre_checks,
+    post_checks = EXCLUDED.post_checks,
+    risk_profile = EXCLUDED.risk_profile;
 
 -- Use Case 2: Credential Rotation
 INSERT INTO use_cases (
@@ -212,6 +231,12 @@ INSERT INTO use_cases (
     scope_validation_enabled,
     llm_provider,
     llm_model,
+    explanation_template,
+    impact_description,
+    splunk_query_config,
+    pre_checks,
+    post_checks,
+    risk_profile,
     is_active,
     sort_order
 ) VALUES (
@@ -295,16 +320,29 @@ Respond in JSON format:
     }',
     30,
     true,
-    ARRAY['credential', 'password', 'rotate', 'username', 'authentication'],
+    ARRAY['rotate_credentials'],
     true,
     NULL,
     NULL,
+    'Rotate credentials on {{device_count}} device(s) with SHA-256 hashed password',
+    'Device access may be briefly affected',
+    '{"query_type": "authentication_events"}',
+    '["Verify current access to affected devices", "Confirm new password meets complexity requirements"]',
+    '["Test login with new credentials", "Verify no authentication failures in logs"]',
+    '{"risk_factors": ["Credential change affects device access", "Concurrent sessions may be impacted"], "mitigation_steps": ["Ensure new credentials are documented securely", "Test access with new credentials immediately"], "affected_services": ["Device access", "Management sessions"]}',
     true,
     2
 ) ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     description = EXCLUDED.description,
-    notification_template = EXCLUDED.notification_template;
+    notification_template = EXCLUDED.notification_template,
+    allowed_actions = EXCLUDED.allowed_actions,
+    explanation_template = EXCLUDED.explanation_template,
+    impact_description = EXCLUDED.impact_description,
+    splunk_query_config = EXCLUDED.splunk_query_config,
+    pre_checks = EXCLUDED.pre_checks,
+    post_checks = EXCLUDED.post_checks,
+    risk_profile = EXCLUDED.risk_profile;
 
 -- Use Case 3: Security Advisory Response
 INSERT INTO use_cases (
@@ -322,6 +360,12 @@ INSERT INTO use_cases (
     scope_validation_enabled,
     llm_provider,
     llm_model,
+    explanation_template,
+    impact_description,
+    splunk_query_config,
+    pre_checks,
+    post_checks,
+    risk_profile,
     is_active,
     sort_order
 ) VALUES (
@@ -405,16 +449,29 @@ Respond in JSON format:
     }',
     60,
     true,
-    ARRAY['security', 'advisory', 'cve', 'vulnerability', 'patch', 'remediation'],
+    ARRAY['apply_security_patch', 'security_remediation'],
     true,
     NULL,
     NULL,
+    'Apply security ACL on {{device_count}} device(s) to block exploit traffic',
+    'ACL changes may affect traffic matching deny rules',
+    '{"query_type": "config_changes"}',
+    '["Review ACL entries for correctness", "Verify interface attachment points"]',
+    '["Verify ACL hit counters", "Confirm no legitimate traffic blocked", "Check vulnerability status"]',
+    '{"risk_factors": ["ACL changes may impact legitimate traffic", "Blocking rules are permanent until removed"], "mitigation_steps": ["Monitor traffic after applying ACL", "Have NOC on standby for user reports"], "affected_services": ["Network traffic filtering", "Security posture"]}',
     true,
     3
 ) ON CONFLICT (name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     description = EXCLUDED.description,
-    notification_template = EXCLUDED.notification_template;
+    notification_template = EXCLUDED.notification_template,
+    allowed_actions = EXCLUDED.allowed_actions,
+    explanation_template = EXCLUDED.explanation_template,
+    impact_description = EXCLUDED.impact_description,
+    splunk_query_config = EXCLUDED.splunk_query_config,
+    pre_checks = EXCLUDED.pre_checks,
+    post_checks = EXCLUDED.post_checks,
+    risk_profile = EXCLUDED.risk_profile;
 
 -- =============================================================================
 -- Default MCP Server Entries for dCloud deployment

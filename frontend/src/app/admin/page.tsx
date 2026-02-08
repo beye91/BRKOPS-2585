@@ -163,7 +163,7 @@ function Modal({ isOpen, onClose, title, children }: { isOpen: boolean; onClose:
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="relative bg-background-elevated rounded-xl border border-border p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto"
+        className="relative bg-background-elevated rounded-xl border border-border p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto"
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">{title}</h3>
@@ -958,6 +958,13 @@ function UseCaseModal({
     ],
   };
 
+  const SPLUNK_QUERY_TYPES = [
+    { value: 'general', label: 'General Logs' },
+    { value: 'ospf_events', label: 'OSPF Events' },
+    { value: 'authentication_events', label: 'Authentication Events' },
+    { value: 'config_changes', label: 'Configuration Changes' },
+  ];
+
   const [formData, setFormData] = useState({
     name: '',
     display_name: '',
@@ -969,11 +976,20 @@ function UseCaseModal({
     convergence_wait_seconds: 45,
     llm_provider: '',
     llm_model: '',
+    explanation_template: '',
+    impact_description: '',
+    splunk_query_type: 'general',
+    pre_checks: [] as string[],
+    post_checks: [] as string[],
+    risk_factors: [] as string[],
+    mitigation_steps: [] as string[],
+    affected_services: [] as string[],
     is_active: true,
   });
 
   useEffect(() => {
     if (useCase) {
+      const rp = useCase.risk_profile || {};
       setFormData({
         name: useCase.name || '',
         display_name: useCase.display_name || '',
@@ -985,6 +1001,14 @@ function UseCaseModal({
         convergence_wait_seconds: useCase.convergence_wait_seconds || 45,
         llm_provider: useCase.llm_provider || '',
         llm_model: useCase.llm_model || '',
+        explanation_template: useCase.explanation_template || '',
+        impact_description: useCase.impact_description || '',
+        splunk_query_type: useCase.splunk_query_config?.query_type || 'general',
+        pre_checks: useCase.pre_checks || [],
+        post_checks: useCase.post_checks || [],
+        risk_factors: rp.risk_factors || [],
+        mitigation_steps: rp.mitigation_steps || [],
+        affected_services: rp.affected_services || [],
         is_active: useCase.is_active ?? true,
       });
     } else {
@@ -999,6 +1023,14 @@ function UseCaseModal({
         convergence_wait_seconds: 45,
         llm_provider: '',
         llm_model: '',
+        explanation_template: '',
+        impact_description: '',
+        splunk_query_type: 'general',
+        pre_checks: [],
+        post_checks: [],
+        risk_factors: [],
+        mitigation_steps: [],
+        affected_services: [],
         is_active: true,
       });
     }
@@ -1030,17 +1062,40 @@ function UseCaseModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const { splunk_query_type, risk_factors, mitigation_steps, affected_services, ...rest } = formData;
     const data = {
-      ...formData,
+      ...rest,
       trigger_keywords: formData.trigger_keywords.split(',').map((k) => k.trim()).filter(Boolean),
       llm_provider: formData.llm_provider || null,
       llm_model: formData.llm_model || null,
+      explanation_template: formData.explanation_template || null,
+      impact_description: formData.impact_description || null,
+      splunk_query_config: { query_type: splunk_query_type },
+      pre_checks: formData.pre_checks.length > 0 ? formData.pre_checks : null,
+      post_checks: formData.post_checks.length > 0 ? formData.post_checks : null,
+      risk_profile: (risk_factors.length > 0 || mitigation_steps.length > 0 || affected_services.length > 0)
+        ? { risk_factors, mitigation_steps, affected_services }
+        : null,
     };
     if (useCase) {
       updateMutation.mutate(data);
     } else {
       createMutation.mutate(data);
     }
+  };
+
+  // Helper for list editors (add/remove items)
+  const updateList = (field: 'pre_checks' | 'post_checks' | 'risk_factors' | 'mitigation_steps' | 'affected_services', index: number, value: string) => {
+    const list = [...formData[field]];
+    list[index] = value;
+    setFormData({ ...formData, [field]: list });
+  };
+  const addToList = (field: 'pre_checks' | 'post_checks' | 'risk_factors' | 'mitigation_steps' | 'affected_services') => {
+    setFormData({ ...formData, [field]: [...formData[field], ''] });
+  };
+  const removeFromList = (field: 'pre_checks' | 'post_checks' | 'risk_factors' | 'mitigation_steps' | 'affected_services', index: number) => {
+    const list = formData[field].filter((_: string, i: number) => i !== index);
+    setFormData({ ...formData, [field]: list });
   };
 
   if (!isOpen) return null;
@@ -1186,6 +1241,180 @@ function UseCaseModal({
               <p className="text-xs text-text-muted mt-1">
                 {formData.llm_provider ? 'Select a specific model or use provider default' : 'Select a provider first'}
               </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Pipeline Configuration */}
+        <div className="border-t border-border pt-4">
+          <h4 className="text-sm font-semibold text-text-secondary mb-3 uppercase tracking-wider flex items-center gap-2">
+            <Settings className="w-4 h-4" />
+            Pipeline Configuration
+          </h4>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Explanation Template
+              </label>
+              <input
+                type="text"
+                value={formData.explanation_template}
+                onChange={(e) => setFormData({ ...formData, explanation_template: e.target.value })}
+                placeholder="Change OSPF area to {{new_area}} on {{device_count}} device(s)"
+                className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-sm"
+              />
+              <p className="text-xs text-text-muted mt-1">
+                Variables: {'{{device_count}}'}, {'{{new_area}}'}, {'{{cve_id}}'}, etc.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Impact Description
+              </label>
+              <input
+                type="text"
+                value={formData.impact_description}
+                onChange={(e) => setFormData({ ...formData, impact_description: e.target.value })}
+                placeholder="Brief OSPF neighbor flap during area transition"
+                className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Splunk Query Type
+              </label>
+              <select
+                value={formData.splunk_query_type}
+                onChange={(e) => setFormData({ ...formData, splunk_query_type: e.target.value })}
+                className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary"
+              >
+                {SPLUNK_QUERY_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Pre-Checks List Editor */}
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Pre-Deployment Checks
+              </label>
+              {formData.pre_checks.map((check: string, i: number) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={check}
+                    onChange={(e) => updateList('pre_checks', i, e.target.value)}
+                    className="flex-1 px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-sm"
+                    placeholder="e.g., Verify OSPF neighbor state"
+                  />
+                  <button type="button" onClick={() => removeFromList('pre_checks', i)} className="p-1.5 text-error hover:bg-background rounded">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <button type="button" onClick={() => addToList('pre_checks')} className="text-xs text-primary hover:underline flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add check
+              </button>
+            </div>
+
+            {/* Post-Checks List Editor */}
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Post-Deployment Checks
+              </label>
+              {formData.post_checks.map((check: string, i: number) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={check}
+                    onChange={(e) => updateList('post_checks', i, e.target.value)}
+                    className="flex-1 px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-sm"
+                    placeholder="e.g., Verify routing table convergence"
+                  />
+                  <button type="button" onClick={() => removeFromList('post_checks', i)} className="p-1.5 text-error hover:bg-background rounded">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <button type="button" onClick={() => addToList('post_checks')} className="text-xs text-primary hover:underline flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add check
+              </button>
+            </div>
+
+            {/* Risk Factors */}
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Risk Factors
+              </label>
+              {formData.risk_factors.map((factor: string, i: number) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={factor}
+                    onChange={(e) => updateList('risk_factors', i, e.target.value)}
+                    className="flex-1 px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-sm"
+                    placeholder="e.g., OSPF neighbor adjacency reset"
+                  />
+                  <button type="button" onClick={() => removeFromList('risk_factors', i)} className="p-1.5 text-error hover:bg-background rounded">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <button type="button" onClick={() => addToList('risk_factors')} className="text-xs text-primary hover:underline flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add factor
+              </button>
+            </div>
+
+            {/* Mitigation Steps */}
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Mitigation Steps
+              </label>
+              {formData.mitigation_steps.map((step: string, i: number) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={step}
+                    onChange={(e) => updateList('mitigation_steps', i, e.target.value)}
+                    className="flex-1 px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-sm"
+                    placeholder="e.g., Ensure backup paths exist"
+                  />
+                  <button type="button" onClick={() => removeFromList('mitigation_steps', i)} className="p-1.5 text-error hover:bg-background rounded">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <button type="button" onClick={() => addToList('mitigation_steps')} className="text-xs text-primary hover:underline flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add step
+              </button>
+            </div>
+
+            {/* Affected Services */}
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                Affected Services
+              </label>
+              {formData.affected_services.map((svc: string, i: number) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={svc}
+                    onChange={(e) => updateList('affected_services', i, e.target.value)}
+                    className="flex-1 px-3 py-1.5 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-sm"
+                    placeholder="e.g., OSPF routing"
+                  />
+                  <button type="button" onClick={() => removeFromList('affected_services', i)} className="p-1.5 text-error hover:bg-background rounded">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <button type="button" onClick={() => addToList('affected_services')} className="text-xs text-primary hover:underline flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add service
+              </button>
             </div>
           </div>
         </div>

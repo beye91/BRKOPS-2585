@@ -4,6 +4,7 @@
 # =============================================================================
 
 import asyncio
+import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
@@ -564,7 +565,7 @@ async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase,
     - confidence: Confidence score (0-100)
     """
 
-    intent = await llm_service.parse_intent(job.input_text, intent_prompt)
+    intent = await llm_service.parse_intent(job.input_text, intent_prompt, use_case=use_case)
 
     # Validate intent scope if use case is provided
     if use_case:
@@ -667,9 +668,7 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
 
     from services.config_builder import (
         parse_running_config,
-        build_ospf_area_change,
-        build_credential_rotation,
-        build_security_acl,
+        build_config_for_action,
     )
 
     intent = job.stages_data.get("intent_parsing", {}).get("data", {})
@@ -732,41 +731,34 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
 
             parsed = parse_running_config(raw_config)
 
-            if action in ("modify_ospf_area", "modify_ospf_config", "change_area"):
-                change = build_ospf_area_change(
-                    parsed,
-                    new_area=params.get("new_area", 10),
-                    ospf_process_id=params.get("ospf_process_id"),
+            # Registry dispatch - try registered builder first, then LLM fallback
+            change = build_config_for_action(action, parsed, params)
+
+            if change is None:
+                # No registered builder -> LLM fallback with running config context
+                llm_service = LLMService(
+                    demo_mode=demo_mode,
+                    provider=getattr(use_case, 'llm_provider', None) if use_case else None,
+                    model=getattr(use_case, 'llm_model', None) if use_case else None,
                 )
-            elif action == "rotate_credentials":
-                # Use same password across all devices for consistency
-                if not per_device_configs:
-                    change = build_credential_rotation(parsed)
-                    # Extract generated password for reuse
-                    _shared_password = None
-                    for w in change.warnings:
-                        if w.startswith("Generated password:"):
-                            _shared_password = w.split(": ", 1)[1]
-                            break
-                else:
-                    # Reuse the password from first device
-                    first_cfg = next(iter(per_device_configs.values()))
-                    _shared_password = None
-                    for w in first_cfg.get("warnings", []):
-                        if w.startswith("Generated password:"):
-                            _shared_password = w.split(": ", 1)[1]
-                            break
-                    change = build_credential_rotation(parsed, new_password=_shared_password)
-            elif action in ("apply_security_patch", "security_remediation"):
-                cve_id = params.get("cve_id", "SEC")
-                acl_name = f"{cve_id}-BLOCK"
-                rules = params.get("acl_rules", [
-                    {"action": "deny", "protocol": "tcp", "source": "any", "destination": "any eq 445", "extras": "log"},
-                    {"action": "deny", "protocol": "udp", "source": "any", "destination": "any eq 445", "extras": "log"},
-                ])
-                change = build_security_acl(parsed, acl_name=acl_name, rules=rules)
-            else:
-                change = build_ospf_area_change(parsed, new_area=params.get("new_area", 10))
+                config_prompt = use_case.config_prompt if use_case else "Generate Cisco IOS configuration.\n\nIntent: {{intent}}\nCurrent Config: {{current_config}}"
+                prompt = config_prompt.replace("{{intent}}", json.dumps(intent))
+                prompt = prompt.replace("{{current_config}}", raw_config[:8000])
+                response = await llm_service.complete(prompt=prompt, json_response=True)
+                result_data = json.loads(response)
+                from services.config_builder import ConfigChangeResult
+                change = ConfigChangeResult(
+                    commands=result_data.get("commands", []),
+                    rollback_commands=result_data.get("rollback_commands", []),
+                    warnings=result_data.get("warnings", []),
+                )
+
+            # For credential rotation: reuse generated password across devices
+            if action == "rotate_credentials" and not params.get("new_password"):
+                for w in change.warnings:
+                    if w.startswith("Generated password:"):
+                        params["new_password"] = w.split(": ", 1)[1]
+                        break
 
             per_device_configs[device_label] = {
                 "commands": change.commands,
@@ -808,15 +800,11 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
     device_count = len(per_device_configs)
     risk_level = "high" if device_count > 2 else ("medium" if device_count > 1 else "low")
 
-    # Build explanation from action
-    if action in ("modify_ospf_area", "modify_ospf_config", "change_area"):
-        explanation = f"Change OSPF area to {params.get('new_area', 10)} on {device_count} device(s) based on live running configs"
-    elif action == "rotate_credentials":
-        explanation = f"Rotate credentials on {device_count} device(s) with SHA-256 hashed password"
-    elif action in ("apply_security_patch", "security_remediation"):
-        explanation = f"Apply security ACL on {device_count} device(s) to block exploit traffic"
-    else:
-        explanation = f"Configuration change on {device_count} device(s)"
+    # Build explanation from use case template (DB-driven)
+    template = getattr(use_case, 'explanation_template', None) or 'Configuration change on {{device_count}} device(s)'
+    explanation = template.replace("{{device_count}}", str(device_count))
+    for k, v in params.items():
+        explanation = explanation.replace(f"{{{{{k}}}}}", str(v))
 
     config_result = {
         "commands": first_cfg.get("commands", []),
@@ -825,7 +813,7 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
         "target_devices": target_devices,
         "explanation": explanation,
         "risk_level": risk_level,
-        "estimated_impact": "Brief OSPF neighbor flap during area transition" if "ospf" in action else "Minimal impact expected",
+        "estimated_impact": getattr(use_case, 'impact_description', None) or "Minimal impact expected",
     }
 
     total_commands = sum(len(c.get("commands", [])) for c in per_device_configs.values())
@@ -853,7 +841,7 @@ async def process_ai_advice(ctx: dict, job: PipelineJob, use_case: UseCase, db, 
     intent = job.stages_data.get("intent_parsing", {}).get("data", {})
     config = job.stages_data.get("config_generation", {}).get("data", {})
 
-    advice = await llm_service.generate_advice(intent, config)
+    advice = await llm_service.generate_advice(intent, config, use_case=use_case)
 
     logger.info(
         "AI advice generated",
@@ -1238,17 +1226,19 @@ async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase
         deployment = job.stages_data.get("cml_deployment", {}).get("data", {})
         device = deployment.get("device")
 
-        # Determine query based on use case
-        index = use_case.splunk_index if use_case else "netops"
+        # Determine query based on use case DB config (no more hardcoded branching)
+        splunk_cfg = getattr(use_case, 'splunk_query_config', None) or {"query_type": "general"}
+        query_type = splunk_cfg.get("query_type", "general")
 
-        if "ospf" in job.use_case_name.lower():
-            results = await client.search_ospf_events("-5m", device)
-        elif "credential" in job.use_case_name.lower():
-            results = await client.search_authentication_events("-5m", device)
-        elif "security" in job.use_case_name.lower():
-            results = await client.search_config_changes("-5m", device)
+        SPLUNK_DISPATCH = {
+            "ospf_events": client.search_ospf_events,
+            "authentication_events": client.search_authentication_events,
+            "config_changes": client.search_config_changes,
+        }
+        query_fn = SPLUNK_DISPATCH.get(query_type)
+        if query_fn:
+            results = await query_fn("-5m", device)
         else:
-            # General query
             results = await client.get_device_logs(device, "-5m") if device else {}
 
         return {

@@ -121,19 +121,28 @@ export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused
         {(() => {
           const validation = stagesData.ai_validation?.data;
           const notificationResults = stagesData.notifications?.data?.results;
-          const snowTicket = notificationResults?.find((r: any) => r.channel === 'servicenow' && r.ticket_number);
+          const snowResult = notificationResults?.find((r: any) => r.channel === 'servicenow');
           const isRollbackRequired = validation?.rollback_recommended ||
             validation?.validation_status === 'FAILED' ||
             validation?.validation_status === 'ROLLBACK_REQUIRED';
 
           if (!isRollbackRequired || !stagesData.ai_validation?.status) return null;
 
+          let snowMessage = '';
+          if (snowResult) {
+            if (snowResult.ticket_number) {
+              snowMessage = ` ServiceNow: ${snowResult.ticket_number}`;
+            } else if (!snowResult.success) {
+              snowMessage = ` ServiceNow: ${snowResult.error || 'Failed to create ticket'}`;
+            }
+          }
+
           return (
             <div className="mb-4">
               <AlertBanner
                 severity="critical"
                 title="ROLLBACK REQUIRED"
-                message={`AI validation detected critical issues.${snowTicket ? ` ServiceNow: ${snowTicket.ticket_number}` : ''}`}
+                message={`AI validation detected critical issues.${snowMessage}`}
                 onAction={handleRollbackClick}
                 actionLabel={isRollingBack ? 'Rolling back...' : 'Initiate Rollback'}
               />

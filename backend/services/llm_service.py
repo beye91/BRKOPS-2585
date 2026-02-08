@@ -178,13 +178,14 @@ class LLMService:
 
         return response.content[0].text
 
-    async def parse_intent(self, transcript: str, intent_prompt: str) -> Dict[str, Any]:
+    async def parse_intent(self, transcript: str, intent_prompt: str, use_case=None) -> Dict[str, Any]:
         """
         Parse intent from voice transcript.
 
         Args:
             transcript: Voice command transcript
             intent_prompt: Template prompt for intent parsing
+            use_case: UseCase DB model (optional, for data-driven intent)
 
         Returns:
             Parsed intent as dictionary
@@ -192,7 +193,7 @@ class LLMService:
         # Demo mode: return realistic mock intent
         if self.demo_mode:
             logger.info("Demo mode: returning mock intent")
-            return self._generate_demo_intent(transcript)
+            return self._generate_demo_intent(transcript, use_case=use_case)
 
         prompt = intent_prompt.replace("{{input_text}}", transcript)
 
@@ -216,142 +217,98 @@ class LLMService:
                 return json.loads(json_match.group())
             raise ValueError(f"Failed to parse JSON from response: {response}")
 
-    def _generate_demo_intent(self, transcript: str) -> Dict[str, Any]:
-        """Generate realistic demo intent based on transcript."""
+    def _extract_target_devices(self, transcript: str) -> list:
+        """Extract target devices from transcript. Shared across all use case types."""
+        import re
         transcript_lower = transcript.lower()
 
-        if "ospf" in transcript_lower and "area" in transcript_lower:
-            import re
+        # Detect "all routers" / "all devices" patterns
+        all_pattern = re.search(
+            r'\b(all\s+(routers?|devices?|of\s+them|network\s+devices?)|every\s+(router|device))\b',
+            transcript_lower
+        )
+        if all_pattern:
+            return ["all"]
 
-            # Detect "all routers" / "all devices" patterns
-            all_pattern = re.search(
-                r'\b(all\s+(routers?|devices?|of\s+them|network\s+devices?)|every\s+(router|device))\b',
-                transcript_lower
-            )
+        # Extract specific router names (e.g. "Router-1 and Router-3", "Router-2")
+        router_matches = re.findall(r'router[-\s]?(\d+)', transcript_lower)
+        if router_matches:
+            seen = set()
+            devices = []
+            for num in router_matches:
+                d = f"Router-{num}"
+                if d not in seen:
+                    seen.add(d)
+                    devices.append(d)
+            return devices
 
-            if all_pattern:
-                # "all" keyword - will be resolved to actual devices by device_resolver
-                target_devices = ["all"]
-                target_desc = "all routers"
-            else:
-                # Extract specific router names (e.g. "Router-1 and Router-3", "Router-2")
-                router_matches = re.findall(r'router[-\s]?(\d+)', transcript_lower)
-                if router_matches:
-                    target_devices = [f"Router-{num}" for num in router_matches]
-                    # Remove duplicates while preserving order
-                    seen = set()
-                    unique_devices = []
-                    for d in target_devices:
-                        if d not in seen:
-                            seen.add(d)
-                            unique_devices.append(d)
-                    target_devices = unique_devices
-                else:
-                    # Default to Router-1 if no device specified
-                    target_devices = ["Router-1"]
+        return ["Router-1"]
 
-                target_desc = ", ".join(target_devices)
+    def _extract_params(self, transcript: str) -> dict:
+        """Extract common parameters from transcript (area numbers, CVE IDs, etc.)."""
+        import re
+        transcript_lower = transcript.lower()
+        params = {}
 
-            area = "10"
-            area_match = re.search(r'area\s*(\d+)', transcript_lower)
-            if area_match:
-                area = area_match.group(1)
+        # OSPF area number
+        area_match = re.search(r'area\s*(\d+)', transcript_lower)
+        if area_match:
+            params["new_area"] = int(area_match.group(1))
 
-            return {
-                "action": "modify_ospf_area",
-                "target_devices": target_devices,
-                "parameters": {
-                    "new_area": int(area),
-                },
-                "confidence": 95,
-                "reasoning": f"User wants to change OSPF configuration on {target_desc} to use area {area}"
-            }
+        # CVE ID
+        cve_match = re.search(r'cve[-\s]?(\d{4}[-\s]?\d+)', transcript_lower)
+        if cve_match:
+            params["cve_id"] = f"CVE-{cve_match.group(1).replace(' ', '-')}"
 
+        # Credential type
+        if "enable" in transcript_lower:
+            params["credential_type"] = "enable_secret"
+        elif "snmp" in transcript_lower:
+            params["credential_type"] = "snmp"
         elif "credential" in transcript_lower or "password" in transcript_lower:
-            import re as _re
+            params["credential_type"] = "enable_secret"
 
-            # Detect "all" keyword
-            all_pattern = _re.search(
-                r'\b(all\s+(routers?|devices?|of\s+them|network\s+devices?)|every\s+(router|device))\b',
-                transcript_lower
-            )
-            if all_pattern:
-                cred_devices = ["all"]
-            else:
-                router_matches = _re.findall(r'router[-\s]?(\d+)', transcript_lower)
-                if router_matches:
-                    seen = set()
-                    cred_devices = []
-                    for num in router_matches:
-                        d = f"Router-{num}"
-                        if d not in seen:
-                            seen.add(d)
-                            cred_devices.append(d)
-                else:
-                    cred_devices = ["all"]
+        return params
 
-            return {
-                "action": "rotate_credentials",
-                "target_devices": cred_devices,
-                "parameters": {
-                    "credential_type": "enable_secret",
-                    "scope": "datacenter"
-                },
-                "confidence": 90,
-                "reasoning": "User wants to rotate credentials across devices"
-            }
+    def _generate_demo_intent(self, transcript: str, use_case=None) -> Dict[str, Any]:
+        """Generate realistic demo intent based on transcript and use case."""
+        target_devices = self._extract_target_devices(transcript)
+        params = self._extract_params(transcript)
 
-        elif "security" in transcript_lower or "cve" in transcript_lower:
-            import re as _re
-
-            # Extract CVE ID from transcript
-            cve_match = _re.search(r'cve[-\s]?(\d{4}[-\s]?\d+)', transcript_lower)
-            cve_id = f"CVE-{cve_match.group(1).replace(' ', '-')}" if cve_match else "SEC-ADVISORY"
-
-            # Detect "all" keyword or specific routers
-            all_pattern = _re.search(
-                r'\b(all\s+(routers?|devices?|of\s+them|network\s+devices?)|every\s+(router|device))\b',
-                transcript_lower
-            )
-            if all_pattern:
-                sec_devices = ["all"]
-            else:
-                router_matches = _re.findall(r'router[-\s]?(\d+)', transcript_lower)
-                if router_matches:
-                    seen = set()
-                    sec_devices = []
-                    for num in router_matches:
-                        d = f"Router-{num}"
-                        if d not in seen:
-                            seen.add(d)
-                            sec_devices.append(d)
-                else:
-                    sec_devices = ["all"]
-
-            return {
-                "action": "apply_security_patch",
-                "target_devices": sec_devices,
-                "parameters": {
-                    "cve_id": cve_id,
-                    "patch_type": "access_list"
-                },
-                "confidence": 88,
-                "reasoning": f"User wants to apply security remediation for {cve_id}"
-            }
-
+        # Determine action from use_case allowed_actions or fall back
+        if use_case and getattr(use_case, 'allowed_actions', None) and len(use_case.allowed_actions) > 0:
+            allowed = use_case.allowed_actions
+            # Pick best matching action: prefer one whose keywords match the transcript
+            transcript_lower = transcript.lower()
+            action = allowed[0]  # default to first
+            for a in allowed:
+                # If the action name contains a word found in transcript, prefer it
+                action_words = a.lower().replace("_", " ").split()
+                if any(w in transcript_lower for w in action_words if len(w) > 3):
+                    action = a
+                    break
+        elif use_case:
+            # Fallback: use use_case.name as action (contains trigger keywords)
+            action = use_case.name
         else:
-            return {
-                "action": "generic_config_change",
-                "target_devices": ["Router-1"],
-                "parameters": {},
-                "confidence": 70,
-                "reasoning": "Generic configuration change request"
-            }
+            action = "generic_config_change"
+
+        display_name = use_case.display_name if use_case else "generic"
+        target_desc = ", ".join(target_devices) if target_devices != ["all"] else "all routers"
+
+        return {
+            "action": action,
+            "target_devices": target_devices,
+            "parameters": params,
+            "confidence": 85,
+            "reasoning": f"Intent for {display_name} on {target_desc}",
+        }
 
     async def generate_advice(
         self,
         intent: Dict[str, Any],
         config: Dict[str, Any],
+        use_case=None,
     ) -> Dict[str, Any]:
         """
         Generate pre-deployment advice and risk assessment.
@@ -359,6 +316,7 @@ class LLMService:
         Args:
             intent: Parsed intent dictionary
             config: Generated configuration dictionary
+            use_case: UseCase DB model (optional, for DB-driven risk profile)
 
         Returns:
             Advice including risk assessment, recommendations, and approval suggestion
@@ -366,7 +324,7 @@ class LLMService:
         # Demo mode: return realistic mock advice
         if self.demo_mode:
             logger.info("Demo mode: returning mock advice")
-            return self._generate_demo_advice(intent, config)
+            return self._generate_demo_advice(intent, config, use_case=use_case)
 
         prompt = f"""
         Review the following network configuration change before deployment:
@@ -404,20 +362,31 @@ class LLMService:
                 return json.loads(json_match.group())
             raise ValueError(f"Failed to parse JSON from response: {response}")
 
-    def _generate_demo_advice(self, intent: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate advice derived from real per-device config data."""
-        action = intent.get("action", "")
+    def _generate_demo_advice(self, intent: Dict[str, Any], config: Dict[str, Any], use_case=None) -> Dict[str, Any]:
+        """Generate advice derived from real per-device config data and DB-driven risk profile."""
         risk_level = config.get("risk_level", "medium")
         devices = intent.get("target_devices", ["Router-1"])
         per_device = config.get("per_device_configs", {})
 
-        risk_factors = []
-        mitigation_steps = []
-        pre_checks = []
-
         device_count = len(per_device) if per_device else len(devices)
 
-        # Build risk factors from real config data
+        # Get risk profile, pre/post checks from use case DB fields
+        db_risk_profile = getattr(use_case, 'risk_profile', None) or {
+            "risk_factors": ["Configuration change"],
+            "mitigation_steps": ["Review carefully before approval"],
+            "affected_services": ["Network services"],
+        }
+        db_pre_checks = getattr(use_case, 'pre_checks', None) or ["Validate configuration syntax"]
+        db_post_checks = getattr(use_case, 'post_checks', None) or ["Verify device reachability"]
+
+        # Start with DB-defined risk factors
+        risk_factors = list(db_risk_profile.get("risk_factors", []))
+        mitigation_steps = list(db_risk_profile.get("mitigation_steps", []))
+
+        if device_count > 2:
+            risk_factors.append(f"High impact: {device_count} devices affected simultaneously")
+
+        # Merge real per-device data into risk factors
         if per_device:
             for device_label, cfg in per_device.items():
                 cmd_count = len(cfg.get("commands", []))
@@ -428,47 +397,6 @@ class LLMService:
                 for w in warnings:
                     if "already in area" not in w and "Generated password" not in w:
                         risk_factors.append(f"{device_label}: {w}")
-
-        if action in ("modify_ospf_area", "modify_ospf_config", "change_area"):
-            risk_factors.append("OSPF area change will cause temporary neighbor adjacency reset")
-            if device_count > 2:
-                risk_factors.append(f"High impact: {device_count} devices affected simultaneously")
-            mitigation_steps = [
-                "Ensure backup paths exist before applying changes",
-                "Apply during maintenance window if possible",
-                "Per-device rollback commands are ready"
-            ]
-            pre_checks = [
-                "Verify current OSPF neighbor state on all target devices",
-                "Confirm no active maintenance on affected devices",
-                "Review per-device rollback commands"
-            ]
-        elif action == "rotate_credentials":
-            risk_factors.append("Credential change affects device access")
-            risk_factors.append("Concurrent sessions may be impacted")
-            mitigation_steps = [
-                "Ensure new credentials are documented securely",
-                "Test access with new credentials immediately after change"
-            ]
-            pre_checks = [
-                "Verify current access to affected devices",
-                "Confirm new password meets complexity requirements"
-            ]
-        elif action in ("apply_security_patch", "security_remediation"):
-            risk_factors.append("ACL changes may impact legitimate traffic")
-            risk_factors.append("Blocking rules are permanent until removed")
-            mitigation_steps = [
-                "Monitor traffic after applying ACL",
-                "Have NOC on standby for any user reports"
-            ]
-            pre_checks = [
-                "Review ACL entries for correctness",
-                "Verify interface attachment points"
-            ]
-        else:
-            risk_factors.append("Generic configuration change")
-            mitigation_steps = ["Review carefully before approval"]
-            pre_checks = ["Validate configuration syntax"]
 
         # Determine risk level from device count
         if device_count > 2:
@@ -492,9 +420,10 @@ class LLMService:
             "rollback_ready": all_rollback,
             "recommendation": "APPROVE",
             "recommendation_reason": f"Configuration built from live running configs. {device_count} device(s) targeted with {'per-device' if per_device else 'shared'} rollback commands.",
-            "pre_checks": pre_checks,
+            "pre_checks": db_pre_checks,
+            "post_checks": db_post_checks,
             "estimated_duration": "30-60 seconds for configuration application, 15-45 seconds for convergence",
-            "affected_services": ["OSPF routing", "Inter-area traffic"] if "ospf" in action else ["Device access"]
+            "affected_services": db_risk_profile.get("affected_services", ["Network services"]),
         }
 
     async def generate_config(
