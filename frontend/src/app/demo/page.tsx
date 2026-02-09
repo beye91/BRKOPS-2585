@@ -39,6 +39,7 @@ export default function DemoPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [selectedUseCase, setSelectedUseCase] = useState<string>('ospf_configuration_change');
+  const [selectedLab, setSelectedLab] = useState<string | null>(null);
   const [viewingHistoryOp, setViewingHistoryOp] = useState<Operation | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
@@ -52,6 +53,12 @@ export default function DemoPage() {
   const { data: useCases } = useQuery({
     queryKey: ['useCases'],
     queryFn: () => adminApi.listUseCases().then((res) => res.data),
+  });
+
+  // Fetch CML labs
+  const { data: labs } = useQuery({
+    queryKey: ['cml-labs'],
+    queryFn: () => mcpApi.getCMLLabs().then((res) => res.data.labs || []),
   });
 
   // Fetch most recent active operation on page load
@@ -138,6 +145,7 @@ export default function DemoPage() {
       const response = await operationsApi.start({
         text: transcript,
         use_case: selectedUseCase,
+        lab_id: selectedLab,
         demo_mode: true,
       });
 
@@ -227,9 +235,18 @@ export default function DemoPage() {
   const isViewingHistory = viewingHistoryOp !== null;
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-background-elevated/50 backdrop-blur-sm sticky top-0 z-50">
+    <div className="min-h-screen relative">
+      {/* Background Image */}
+      <div
+        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: 'url(/bg.jpg)' }}
+      />
+      <div className="fixed inset-0 z-0 bg-[#0A0E14]/80" />
+
+      {/* Content container - positioned above background */}
+      <div className="relative z-10">
+        {/* Header */}
+        <header className="border-b border-border bg-background-elevated/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link href="/" className="p-2 rounded-lg hover:bg-background-elevated transition-colors">
@@ -251,6 +268,20 @@ export default function DemoPage() {
               {useCases?.map((uc: any) => (
                 <option key={uc.id} value={uc.name}>
                   {uc.display_name}
+                </option>
+              ))}
+            </select>
+
+            {/* Lab Selector */}
+            <select
+              value={selectedLab || ''}
+              onChange={(e) => setSelectedLab(e.target.value || null)}
+              className="px-3 py-2 bg-background-elevated border border-border rounded-lg text-sm focus:outline-none focus:border-primary"
+            >
+              <option value="">Use case default lab</option>
+              {labs?.map((lab: any) => (
+                <option key={lab.id} value={lab.id}>
+                  {lab.lab_title || lab.title || lab.id} ({lab.node_count || 0} devices)
                 </option>
               ))}
             </select>
@@ -367,6 +398,7 @@ export default function DemoPage() {
                     affectedDevices={
                       displayOperation?.stages?.intent_parsing?.data?.target_devices || []
                     }
+                    labId={selectedLab}
                   />
                 </motion.div>
               )}
@@ -514,6 +546,7 @@ export default function DemoPage() {
           />
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 }

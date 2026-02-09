@@ -38,7 +38,7 @@ export default function HomePage() {
       {/* Background Image */}
       <div
         className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
-        style={{ backgroundImage: 'url(/bg.jpg)' }}
+        style={{ backgroundImage: 'url(/bg2-optimized.jpg)' }}
       />
       <div className="fixed inset-0 z-0 bg-[#0A0E14]/80" />
 
