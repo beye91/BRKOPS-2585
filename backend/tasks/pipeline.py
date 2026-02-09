@@ -860,11 +860,12 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
         for device_label in target_devices:
             raw_config = running_configs.get(device_label, "")
             if not raw_config:
-                per_device_configs[device_label] = {
-                    "commands": [],
-                    "rollback_commands": [],
-                    "warnings": [f"No running config available for {device_label}"],
-                }
+                logger.warning(
+                    "No running config for device, will use LLM fallback",
+                    device=device_label,
+                    job_id=str(job.id)
+                )
+                # Don't set per_device_configs here - let it fall through to global LLM fallback
                 continue
 
             parsed = parse_running_config(raw_config)
