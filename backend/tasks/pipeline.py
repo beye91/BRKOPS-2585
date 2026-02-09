@@ -811,14 +811,34 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
             lab_id = await get_target_lab_id(job, use_case, client)
 
             if lab_id:
-                # Fetch running configs in parallel
+                # Fetch running configs in parallel with retry logic
                 async def _fetch(device_label: str) -> Tuple[str, str]:
-                    try:
-                        output = await client.run_command(lab_id, device_label, "show running-config")
-                        return device_label, output
-                    except Exception as e:
-                        logger.warning("Failed to fetch running config", device=device_label, error=str(e))
-                        return device_label, ""
+                    max_retries = 3
+                    retry_delay = 10  # seconds
+
+                    for attempt in range(max_retries):
+                        try:
+                            output = await client.run_command(lab_id, device_label, "show running-config")
+                            if output and len(output) > 100:  # Valid config should be substantial
+                                logger.info("Successfully fetched running config", device=device_label, attempt=attempt+1)
+                                return device_label, output
+                            else:
+                                logger.warning("Empty or invalid config received", device=device_label, attempt=attempt+1)
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to fetch running config",
+                                device=device_label,
+                                attempt=attempt+1,
+                                max_retries=max_retries,
+                                error=str(e)
+                            )
+
+                        if attempt < max_retries - 1:
+                            logger.info("Retrying after delay", device=device_label, delay=retry_delay)
+                            await asyncio.sleep(retry_delay)
+
+                    logger.error("Failed to fetch running config after all retries", device=device_label)
+                    return device_label, ""
 
                 tasks = [_fetch(d) for d in target_devices]
                 results = await asyncio.gather(*tasks)
