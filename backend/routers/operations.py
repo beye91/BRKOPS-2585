@@ -29,6 +29,7 @@ from services.cml_client import CMLClient
 from services.websocket_manager import manager
 from services.llm_service import LLMService
 from services.intent_matcher_service import IntentMatcherService
+from services.config_service import ConfigService
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -66,8 +67,17 @@ async def start_operation(
             detail="No use cases available"
         )
 
-    # Initialize LLM-based matcher
-    llm_service = LLMService(demo_mode=False)
+    # Get LLM configuration from database
+    llm_config = await ConfigService.get_llm_config(db)
+    openai_key = llm_config.get('openai_api_key')
+    anthropic_key = llm_config.get('anthropic_api_key')
+
+    # Initialize LLM-based matcher with database-provided API keys
+    llm_service = LLMService(
+        demo_mode=False,
+        openai_api_key=openai_key,
+        anthropic_api_key=anthropic_key
+    )
     matcher = IntentMatcherService(llm_service)
 
     # Match and parse intent in one pass

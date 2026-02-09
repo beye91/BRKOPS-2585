@@ -21,10 +21,19 @@ class LLMService:
     Supports demo_mode for mock responses without real API calls.
     """
 
-    def __init__(self, demo_mode: bool = False, provider: str = None, model: str = None):
+    def __init__(
+        self,
+        demo_mode: bool = False,
+        provider: str = None,
+        model: str = None,
+        openai_api_key: str = None,
+        anthropic_api_key: str = None
+    ):
         self.demo_mode = demo_mode
         self.provider_override = provider  # 'openai' or 'anthropic' (None = use default)
         self.model_override = model  # specific model name (None = use default)
+        self.openai_api_key = openai_api_key  # Override from database
+        self.anthropic_api_key = anthropic_api_key  # Override from database
         self.openai_client = None
         self.anthropic_client = None
         if not demo_mode:
@@ -32,31 +41,35 @@ class LLMService:
 
     def _init_clients(self):
         """Initialize LLM clients based on available API keys."""
+        # Use provided API keys or fall back to environment variables
+        openai_key = self.openai_api_key or settings.openai_api_key
+        anthropic_key = self.anthropic_api_key or settings.anthropic_api_key
+
         # Check if API keys look valid (not placeholder values)
         openai_key_valid = (
-            settings.openai_api_key and
-            not settings.openai_api_key.startswith("sk-your-") and
-            len(settings.openai_api_key) > 20
+            openai_key and
+            not openai_key.startswith("sk-your-") and
+            len(openai_key) > 20
         )
         anthropic_key_valid = (
-            settings.anthropic_api_key and
-            not settings.anthropic_api_key.startswith("sk-ant-your-") and
-            len(settings.anthropic_api_key) > 20
+            anthropic_key and
+            not anthropic_key.startswith("sk-ant-your-") and
+            len(anthropic_key) > 20
         )
 
         if openai_key_valid:
             try:
                 from openai import AsyncOpenAI
-                self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
-                logger.info("OpenAI client initialized")
+                self.openai_client = AsyncOpenAI(api_key=openai_key)
+                logger.info("OpenAI client initialized", source="database" if self.openai_api_key else "environment")
             except Exception as e:
                 logger.warning("Failed to initialize OpenAI client", error=str(e))
 
         if anthropic_key_valid:
             try:
                 from anthropic import AsyncAnthropic
-                self.anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-                logger.info("Anthropic client initialized")
+                self.anthropic_client = AsyncAnthropic(api_key=anthropic_key)
+                logger.info("Anthropic client initialized", source="database" if self.anthropic_api_key else "environment")
             except Exception as e:
                 logger.warning("Failed to initialize Anthropic client", error=str(e))
 
