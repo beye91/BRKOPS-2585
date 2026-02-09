@@ -27,7 +27,8 @@ from models.operations import (
 from db.models import MCPServer
 from services.cml_client import CMLClient
 from services.websocket_manager import manager
-from services.use_case_matcher import validate_use_case_selection
+from services.llm_service import LLMService
+from services.intent_matcher_service import IntentMatcherService
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -55,91 +56,101 @@ async def start_operation(
             detail="Either text or audio_url must be provided",
         )
 
-    # Find or default use case
-    use_case = None
-    use_case_name = operation.use_case or "ospf_configuration_change"
+    # Get all available use cases from database
+    result = await db.execute(select(UseCase).where(UseCase.is_active == True))
+    available_use_cases = result.scalars().all()
 
-    if operation.use_case:
-        result = await db.execute(
-            select(UseCase).where(UseCase.name == operation.use_case, UseCase.is_active == True)
+    if not available_use_cases:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No use cases available"
         )
-        use_case = result.scalar_one_or_none()
-        if not use_case:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Use case '{operation.use_case}' not found or inactive",
-            )
-        use_case_name = use_case.name
-    else:
-        # Load default use case
-        result = await db.execute(
-            select(UseCase).where(UseCase.name == use_case_name, UseCase.is_active == True)
-        )
-        use_case = result.scalar_one_or_none()
 
-    # Pre-validation: Check if input text matches selected use case
-    # Only validate if we have text input, use case exists, and force mode is not enabled
-    print(f"[DEBUG] Pre-validation: has_text={bool(operation.text)}, has_use_case={bool(use_case)}, force={getattr(operation, 'force', False)}")
-    logger.info(
-        "Pre-validation check",
-        has_text=bool(operation.text),
-        has_use_case=bool(use_case),
-        force_mode=getattr(operation, 'force', False),
-        use_case_name=use_case.name if use_case else None,
+    # Initialize LLM-based matcher
+    llm_service = LLMService(demo_mode=False)
+    matcher = IntentMatcherService(llm_service)
+
+    # Match and parse intent in one pass
+    try:
+        match_result = await matcher.match_and_parse_intent(
+            user_input=operation.text,
+            use_cases=available_use_cases,
+            force_use_case=operation.use_case if operation.force else None
+        )
+    except Exception as e:
+        logger.error("Intent matching failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to match intent: {str(e)}"
+        )
+
+    # Handle no match
+    if match_result.matched_use_case is None:
+        logger.warning(
+            "No use case matched",
+            input=operation.text,
+            reasoning=match_result.reasoning,
+            confidence=match_result.confidence
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "NO_MATCH",
+                "message": "Could not match input to any use case",
+                "reasoning": match_result.reasoning,
+                "confidence": match_result.confidence,
+                "available_use_cases": [
+                    {"name": uc.name, "display_name": uc.display_name}
+                    for uc in available_use_cases
+                ],
+                "suggestion": "Please be more specific or select a use case manually"
+            }
+        )
+
+    # Get matched use case object
+    use_case = next(
+        (uc for uc in available_use_cases if uc.name == match_result.matched_use_case),
+        None
     )
 
-    if operation.text and use_case and not getattr(operation, 'force', False):
-        print("[DEBUG] Inside validation block - about to run validation")
-        logger.info(
-            "Running use case validation",
-            input=operation.text,
-            selected=use_case.name,
+    if not use_case:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Matched use case '{match_result.matched_use_case}' not found in database"
         )
-        # Get all active use cases for matching
-        all_use_cases_result = await db.execute(
-            select(UseCase).where(UseCase.is_active == True)
-        )
-        all_use_cases = all_use_cases_result.scalars().all()
 
-        # Debug: Log loaded use cases and their trigger keywords
-        print(f"[DEBUG] Loaded {len(all_use_cases)} use cases")
-        for uc in all_use_cases:
-            print(f"  - {uc.name}: keywords={uc.trigger_keywords} (type={type(uc.trigger_keywords)})")
-        print(f"[DEBUG] Selected use case '{use_case.name}' keywords: {use_case.trigger_keywords}")
-        print(f"[DEBUG] Input text: '{operation.text}'")
-        print(f"[DEBUG] Calling validator with {len(all_use_cases)} use cases")
+    use_case_name = use_case.name
 
-        validation = validate_use_case_selection(operation.text, use_case, all_use_cases)
-        print(f"[DEBUG] Validation result: {validation}")
-
-        logger.info("Validation result", is_valid=validation.get("is_valid"))
-
-        if not validation["is_valid"]:
-            # Return error with suggestion
-            logger.warning(
-                "Protocol mismatch detected",
-                input=operation.text,
-                selected=use_case.name,
-                suggested=validation.get("suggested_use_case"),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "error": validation["error"],
-                    "message": validation["message"],
-                    "suggested_use_case": validation["suggested_use_case"],
-                    "suggested_display_name": validation["suggested_display_name"],
-                    "confidence": validation["confidence"],
-                    "current_use_case": validation["current_use_case"],
-                    "current_display_name": validation["current_display_name"],
-                    "matched_keywords": validation.get("matched_keywords", []),
-                },
-            )
+    # Log matching result
+    logger.info(
+        "Intent matched to use case",
+        use_case=match_result.matched_use_case,
+        confidence=match_result.confidence,
+        reasoning=match_result.reasoning,
+        action=match_result.extracted_intent.action if match_result.extracted_intent else None,
+        devices=match_result.extracted_intent.devices if match_result.extracted_intent else None
+    )
 
     # Create pipeline job with new stage order
     # Stages: voice_input -> intent_parsing -> config_generation -> ai_advice ->
     #         human_decision -> baseline_collection -> cml_deployment -> monitoring ->
     #         splunk_analysis -> ai_validation -> notifications
+
+    # Store extracted intent in input_metadata for pipeline stages
+    input_metadata = {
+        "match_confidence": match_result.confidence,
+        "match_reasoning": match_result.reasoning,
+        "force_mode": operation.force
+    }
+
+    # Include extracted intent if available
+    if match_result.extracted_intent:
+        input_metadata["extracted_intent"] = {
+            "action": match_result.extracted_intent.action,
+            "devices": match_result.extracted_intent.devices,
+            "parameters": match_result.extracted_intent.parameters
+        }
+
     job = PipelineJob(
         use_case_id=use_case.id if use_case else None,
         use_case_name=use_case_name,
@@ -148,6 +159,7 @@ async def start_operation(
         selected_lab_id=operation.lab_id,
         current_stage='voice_input',
         status='queued',
+        input_metadata=input_metadata,
         stages_data={
             "voice_input": {"status": "pending", "data": None},
             "intent_parsing": {"status": "pending", "data": None},

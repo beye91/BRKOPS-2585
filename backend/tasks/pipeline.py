@@ -659,29 +659,66 @@ async def process_voice_input(ctx: dict, job: PipelineJob, use_case: UseCase, db
 
 
 async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
-    """Parse intent from transcript using LLM."""
-    logger.info("Parsing intent", job_id=str(job.id))
+    """Validate and enrich pre-parsed intent from operations router."""
+    logger.info("Validating intent", job_id=str(job.id))
 
-    llm_service = LLMService(
-        demo_mode=False,  # Always use real LLM clients (demo_mode is for pipeline pausing, not LLM mocking)
-        provider=getattr(use_case, 'llm_provider', None) if use_case else None,
-        model=getattr(use_case, 'llm_model', None) if use_case else None,
-    )
+    # Intent was already parsed by LLM matcher during operation creation
+    # This stage validates and enriches with use case-specific details
+    pre_parsed_intent = job.input_metadata.get("extracted_intent") if job.input_metadata else None
 
-    # Get intent prompt from use case or default
-    intent_prompt = use_case.intent_prompt if use_case else """
-    Analyze the following voice command and extract structured intent:
+    if not pre_parsed_intent:
+        # Fallback: parse intent now if not pre-parsed
+        logger.warning("No pre-parsed intent found, parsing now", job_id=str(job.id))
 
-    Voice Command: {{input_text}}
+        llm_service = LLMService(
+            demo_mode=False,
+            provider=getattr(use_case, 'llm_provider', None) if use_case else None,
+            model=getattr(use_case, 'llm_model', None) if use_case else None,
+        )
 
-    Respond in JSON format with:
-    - action: The type of action requested
-    - target_devices: List of target devices
-    - parameters: Dictionary of parameters
-    - confidence: Confidence score (0-100)
-    """
+        intent_prompt = use_case.intent_prompt if use_case else """
+        Analyze the following voice command and extract structured intent:
 
-    intent = await llm_service.parse_intent(job.input_text, intent_prompt, use_case=use_case)
+        Voice Command: {{input_text}}
+
+        Respond in JSON format with:
+        - action: The type of action requested
+        - target_devices: List of target devices
+        - parameters: Dictionary of parameters
+        - confidence: Confidence score (0-100)
+        """
+
+        intent = await llm_service.parse_intent(job.input_text, intent_prompt, use_case=use_case)
+    else:
+        # Use pre-parsed intent
+        intent = {
+            "action": pre_parsed_intent.get("action"),
+            "target_devices": pre_parsed_intent.get("devices", []),
+            "parameters": pre_parsed_intent.get("parameters", {}),
+            "confidence": job.input_metadata.get("match_confidence", 100)
+        }
+
+        logger.info(
+            "Using pre-parsed intent",
+            job_id=str(job.id),
+            action=intent["action"],
+            devices=intent["target_devices"]
+        )
+
+    # Validate action against use case allowed_actions
+    if use_case and use_case.allowed_actions:
+        action = intent.get("action")
+        if action not in use_case.allowed_actions:
+            logger.error(
+                "Action not allowed for use case",
+                job_id=str(job.id),
+                action=action,
+                allowed_actions=use_case.allowed_actions
+            )
+            raise ValueError(
+                f"Action '{action}' not allowed for use case '{use_case.name}'. "
+                f"Allowed actions: {use_case.allowed_actions}"
+            )
 
     # Validate intent scope if use case is provided
     if use_case:

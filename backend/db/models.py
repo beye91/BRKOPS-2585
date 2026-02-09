@@ -158,6 +158,7 @@ class PipelineJob(Base):
     use_case_name = Column(String(100), nullable=False)
     input_text = Column(Text, nullable=False)
     input_audio_url = Column(Text)
+    input_metadata = Column(JSONB, default={})  # Stores LLM matching results
     selected_lab_id = Column(String, nullable=True)
     current_stage = Column(pipeline_stage_enum, nullable=False, default='voice_input')
     status = Column(job_status_enum, nullable=False, default='pending')
