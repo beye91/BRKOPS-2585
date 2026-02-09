@@ -3,6 +3,7 @@
 # Client for CML MCP Server communication using FastMCP
 # =============================================================================
 
+import asyncio
 import base64
 import re
 from typing import Any, Dict, List, Optional
@@ -873,10 +874,12 @@ end"""
 
     async def reset_lab_configs(self, lab_id: str) -> Dict[str, Any]:
         """
-        Reset all router configurations to baseline demo state.
+        Reset all router configurations to baseline demo state with retry logic.
 
         This applies the original startup interface configurations to each router
         via CLI commands without needing to stop/wipe/restart the lab.
+
+        Includes retry logic to handle transient device console connection issues.
 
         Args:
             lab_id: Lab UUID
@@ -892,24 +895,60 @@ end"""
         }
 
         results = {}
+        max_retries = 5  # Increased retries for booting routers
+        retry_delay = 30  # Increased delay - routers may still be booting
+
         for label, config in baseline_configs.items():
-            try:
-                # Apply config via CLI using commands parameter (as string)
-                await self._call_tool("send_cli_command", {
-                    "lid": lab_id,
-                    "label": label,
-                    "commands": config,
-                    "config_command": True,
-                })
-                results[label] = "success"
-                logger.info("Router config reset", lab_id=lab_id, router=label)
-            except Exception as e:
-                results[label] = f"error: {str(e)}"
+            success = False
+            last_error = None
+
+            for attempt in range(max_retries):
+                try:
+                    # Apply config via CLI using commands parameter (as string)
+                    await self._call_tool("send_cli_command", {
+                        "lid": lab_id,
+                        "label": label,
+                        "commands": config,
+                        "config_command": True,
+                    })
+                    results[label] = "success"
+                    success = True
+                    logger.info(
+                        "Successfully reset router config",
+                        lab_id=lab_id,
+                        router=label,
+                        attempt=attempt + 1
+                    )
+                    break
+                except Exception as e:
+                    last_error = str(e)
+                    logger.warning(
+                        "Failed to reset router config",
+                        lab_id=lab_id,
+                        router=label,
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        error=str(e)
+                    )
+
+                    if attempt < max_retries - 1:
+                        logger.info(
+                            "Retrying after delay",
+                            lab_id=lab_id,
+                            router=label,
+                            delay=retry_delay,
+                            next_attempt=attempt + 2
+                        )
+                        await asyncio.sleep(retry_delay)
+
+            if not success:
+                results[label] = f"failed after {max_retries} attempts: {last_error}"
                 logger.error(
-                    "Failed to reset router config",
+                    "Failed to reset router config after all retries",
                     lab_id=lab_id,
                     router=label,
-                    error=str(e),
+                    max_retries=max_retries,
+                    error=last_error
                 )
 
         return {"reset_results": results}

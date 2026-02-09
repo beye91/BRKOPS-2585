@@ -663,7 +663,7 @@ async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase,
     logger.info("Parsing intent", job_id=str(job.id))
 
     llm_service = LLMService(
-        demo_mode=demo_mode,
+        demo_mode=False,  # Always use real LLM clients (demo_mode is for pipeline pausing, not LLM mocking)
         provider=getattr(use_case, 'llm_provider', None) if use_case else None,
         model=getattr(use_case, 'llm_model', None) if use_case else None,
     )
@@ -876,7 +876,7 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
             if change is None:
                 # No registered builder -> LLM fallback with running config context
                 llm_service = LLMService(
-                    demo_mode=demo_mode,
+                    demo_mode=False,  # Always use real LLM clients (demo_mode is for pipeline pausing, not LLM mocking)
                     provider=getattr(use_case, 'llm_provider', None) if use_case else None,
                     model=getattr(use_case, 'llm_model', None) if use_case else None,
                 )
@@ -913,7 +913,7 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
     if not per_device_configs:
         logger.warning("No running configs, falling back to LLM config generation", job_id=str(job.id))
         llm_service = LLMService(
-            demo_mode=demo_mode,
+            demo_mode=False,  # Always use real LLM clients (demo_mode is for pipeline pausing, not LLM mocking)
             provider=getattr(use_case, 'llm_provider', None) if use_case else None,
             model=getattr(use_case, 'llm_model', None) if use_case else None,
         )
@@ -971,7 +971,7 @@ async def process_ai_advice(ctx: dict, job: PipelineJob, use_case: UseCase, db, 
     logger.info("Generating AI advice", job_id=str(job.id))
 
     llm_service = LLMService(
-        demo_mode=demo_mode,
+        demo_mode=False,  # Always use real LLM clients (demo_mode is for pipeline pausing, not LLM mocking)
         provider=getattr(use_case, 'llm_provider', None) if use_case else None,
         model=getattr(use_case, 'llm_model', None) if use_case else None,
     )
@@ -1498,7 +1498,7 @@ async def process_ai_validation(ctx: dict, job: PipelineJob, use_case: UseCase, 
         }
 
     llm_service = LLMService(
-        demo_mode=demo_mode,
+        demo_mode=False,  # Always use real LLM clients (demo_mode is for pipeline pausing, not LLM mocking)
         provider=getattr(use_case, 'llm_provider', None) if use_case else None,
         model=getattr(use_case, 'llm_model', None) if use_case else None,
     )
