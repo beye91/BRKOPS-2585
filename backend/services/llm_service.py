@@ -32,7 +32,19 @@ class LLMService:
 
     def _init_clients(self):
         """Initialize LLM clients based on available API keys."""
-        if settings.openai_api_key:
+        # Check if API keys look valid (not placeholder values)
+        openai_key_valid = (
+            settings.openai_api_key and
+            not settings.openai_api_key.startswith("sk-your-") and
+            len(settings.openai_api_key) > 20
+        )
+        anthropic_key_valid = (
+            settings.anthropic_api_key and
+            not settings.anthropic_api_key.startswith("sk-ant-your-") and
+            len(settings.anthropic_api_key) > 20
+        )
+
+        if openai_key_valid:
             try:
                 from openai import AsyncOpenAI
                 self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
@@ -40,7 +52,7 @@ class LLMService:
             except Exception as e:
                 logger.warning("Failed to initialize OpenAI client", error=str(e))
 
-        if settings.anthropic_api_key:
+        if anthropic_key_valid:
             try:
                 from anthropic import AsyncAnthropic
                 self.anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
@@ -69,6 +81,13 @@ class LLMService:
         Returns:
             Generated text response
         """
+        # Check if any LLM clients are available
+        if not self.openai_client and not self.anthropic_client:
+            raise RuntimeError(
+                "No LLM providers configured. Please set valid OPENAI_API_KEY or ANTHROPIC_API_KEY "
+                "environment variables. Current keys appear to be placeholder values."
+            )
+
         temperature = temperature or settings.llm_temperature
         max_tokens = max_tokens or settings.llm_max_tokens
 
