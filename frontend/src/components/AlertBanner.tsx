@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 interface AlertBannerProps {
   severity: 'critical' | 'warning' | 'info';
   title: string;
-  message: string;
+  message: string | React.ReactNode;
   onAction?: () => void;
   actionLabel?: string;
   onDismiss?: () => void;

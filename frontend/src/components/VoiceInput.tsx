@@ -134,7 +134,7 @@ export function VoiceInput({
   return (
     <div className="bg-background-elevated rounded-xl border border-border p-6">
       <h2 className="text-lg font-semibold mb-6">
-        {micAvailable === false ? 'Command Input' : 'Voice Command Input'}
+        Network Command Input
       </h2>
 
       {/* Mic UI - only shown when mic is available */}
@@ -187,7 +187,7 @@ export function VoiceInput({
               ? 'Recording... Click to stop'
               : isTranscribing
               ? 'Transcribing audio...'
-              : 'Click to start recording your voice command'}
+              : 'Click the microphone to speak your command'}
           </p>
         </>
       )}
@@ -195,21 +195,19 @@ export function VoiceInput({
       {/* Text input description when mic is unavailable */}
       {micAvailable === false && (
         <p className="text-text-secondary mb-4">
-          Enter your network operation command below, or select an example to get started.
+          Enter your network command below, or select an example to get started.
         </p>
       )}
 
       {/* Transcript Input */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-text-secondary mb-2">
-          {micAvailable === false ? 'Network Command' : 'Voice Command Transcript'}
+          Command
         </label>
         <textarea
           value={transcript}
           onChange={(e) => setTranscript(e.target.value)}
-          placeholder={micAvailable === false
-            ? "Type your network operation command..."
-            : "Your voice command will appear here, or type directly..."}
+          placeholder="Speak or type your network command..."
           className="w-full h-32 px-4 py-3 bg-background border border-border rounded-lg resize-none focus:outline-none focus:border-primary"
         />
       </div>
@@ -234,7 +232,7 @@ export function VoiceInput({
 
       {/* Start Button */}
       <button
-        onClick={onStart}
+        onClick={() => onStart()}
         disabled={!transcript.trim() || isLoading}
         className={cn(
           'w-full py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors',

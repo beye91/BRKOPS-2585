@@ -26,7 +26,9 @@ class OperationCreate(BaseModel):
     text: Optional[str] = Field(None, description="Voice command transcript or text input")
     audio_url: Optional[str] = Field(None, description="URL to uploaded audio file")
     use_case: Optional[str] = Field(None, description="Specific use case to apply")
+    lab_id: Optional[str] = Field(None, description="User-selected lab override")
     demo_mode: bool = Field(True, description="Enable step-by-step advancement")
+    force: bool = Field(False, description="Skip use case validation (advanced mode)")
 
     class Config:
         json_schema_extra = {
@@ -34,6 +36,7 @@ class OperationCreate(BaseModel):
                 "text": "I want to change OSPF configuration on Router-1 to use area 10",
                 "use_case": "ospf_configuration_change",
                 "demo_mode": True,
+                "force": False,
             }
         }
 

@@ -1,0 +1,5 @@
+[GET] http://198.18.134.22:8003/api/v1/operations?limit=10 => [200] OK
+[GET] http://198.18.134.22:8003/api/v1/admin/use-cases => [200] OK
+[GET] http://198.18.134.22:8003/api/v1/mcp/cml/labs => [200] OK
+[GET] http://198.18.134.22:8003/api/v1/operations => [200] OK
+[GET] http://198.18.134.22:3003/?_rsc=16og9 => [200] OK

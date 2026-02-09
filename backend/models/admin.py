@@ -81,6 +81,7 @@ class UseCaseCreate(BaseModel):
     pre_checks: Optional[List[str]] = Field(None, description="Pre-deployment checks")
     post_checks: Optional[List[str]] = Field(None, description="Post-deployment checks")
     risk_profile: Optional[Dict[str, Any]] = Field(None, description="Risk factors, mitigation steps, and affected services")
+    ospf_config_strategy: str = Field('dual', description="OSPF config generation mode: dual, network_only, interface_only")
     is_active: bool = Field(True, description="Whether use case is active")
     sort_order: int = Field(0, description="Display sort order")
 
@@ -127,6 +128,7 @@ class UseCaseUpdate(BaseModel):
     pre_checks: Optional[List[str]] = None
     post_checks: Optional[List[str]] = None
     risk_profile: Optional[Dict[str, Any]] = None
+    ospf_config_strategy: Optional[str] = None
     is_active: Optional[bool] = None
     sort_order: Optional[int] = None
 
@@ -157,6 +159,7 @@ class UseCaseResponse(BaseModel):
     pre_checks: Optional[List[str]] = None
     post_checks: Optional[List[str]] = None
     risk_profile: Optional[Dict[str, Any]] = None
+    ospf_config_strategy: str = 'dual'
     is_active: bool
     sort_order: int
     created_at: datetime

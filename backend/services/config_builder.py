@@ -380,11 +380,38 @@ def generate_secure_password(length: int = 20) -> str:
 # OSPF Area Change Builder
 # =============================================================================
 
+def _generate_interface_ospf_commands(
+    interfaces: List[Dict],
+    ospf_process_id: int,
+    new_area: int,
+) -> Tuple[List[str], List[str]]:
+    """
+    Generate interface-level OSPF commands from interface metadata.
+
+    Args:
+        interfaces: List of interface metadata dicts with 'name' and 'current_area'
+        ospf_process_id: OSPF process ID
+        new_area: Target OSPF area number
+
+    Returns:
+        Tuple of (commands, rollback_commands)
+    """
+    commands = []
+    rollback = []
+    for iface in interfaces:
+        commands.append(f"interface {iface['name']}")
+        commands.append(f" ip ospf {ospf_process_id} area {new_area}")
+        rollback.append(f"interface {iface['name']}")
+        rollback.append(f" ip ospf {ospf_process_id} area {iface['current_area']}")
+    return commands, rollback
+
+
 def build_ospf_area_change(
     parsed: ParsedConfig,
     new_area: int,
     ospf_process_id: Optional[int] = None,
     target_interfaces: Optional[List[str]] = None,
+    config_strategy: str = "dual",
 ) -> ConfigChangeResult:
     """
     Build commands to change OSPF area on a device.
@@ -429,7 +456,22 @@ def build_ospf_area_change(
         for iface in parsed.interfaces.values()
     )
 
-    if uses_network_statements and ospf:
+    # Determine what to generate based on strategy
+    generate_network_commands = False
+    generate_interface_commands = False
+
+    if config_strategy == "dual":
+        generate_network_commands = uses_network_statements
+        generate_interface_commands = True  # Always try to generate
+    elif config_strategy == "network_only":
+        generate_network_commands = uses_network_statements
+        generate_interface_commands = False
+    elif config_strategy == "interface_only":
+        generate_network_commands = False
+        generate_interface_commands = True
+
+    # Generate network statement commands
+    if generate_network_commands and ospf:
         # Network-statement style (typical CML baseline)
         result.commands.append(f"router ospf {ospf_process_id}")
         result.rollback_commands.append(f"router ospf {ospf_process_id}")
@@ -473,7 +515,24 @@ def build_ospf_area_change(
             result.rollback_commands.append(f" no network {stmt.network} {stmt.wildcard} area {new_area}")
             result.rollback_commands.append(f" network {stmt.network} {stmt.wildcard} area {stmt.area}")
 
-    elif uses_interface_level:
+    # Generate interface-level commands (NEW - for dual mode and interface_only mode)
+    if generate_interface_commands and result.affected_interfaces:
+        iface_cmds, iface_rollback = _generate_interface_ospf_commands(
+            result.affected_interfaces,
+            ospf_process_id,
+            new_area
+        )
+        result.commands.extend(iface_cmds)
+        result.rollback_commands.extend(iface_rollback)
+
+    # Special handling for interface_only mode - remove network statements
+    if config_strategy == "interface_only" and ospf and len(ospf.network_statements) > 0:
+        result.commands.insert(0, f"router ospf {ospf_process_id}")
+        for stmt in ospf.network_statements:
+            result.commands.append(f" no network {stmt.network} {stmt.wildcard} area {stmt.area}")
+
+    # Legacy path: Per-interface style detection (only if interface commands weren't generated)
+    if not generate_interface_commands and uses_interface_level:
         # Per-interface style (ip ospf X area Y on each interface)
         for iface_name, iface in parsed.interfaces.items():
             if iface.ospf_process_id is None or iface.ospf_area is None:
@@ -503,7 +562,8 @@ def build_ospf_area_change(
             result.commands.append(f" ip ospf {iface.ospf_process_id} area {new_area}")
             result.rollback_commands.append(f"interface {iface_name}")
             result.rollback_commands.append(f" ip ospf {iface.ospf_process_id} area {old_area}")
-    else:
+
+    if not result.commands:
         result.warnings.append("No OSPF configuration found to modify")
 
     # Clean up empty command lists (only had the router ospf header)
@@ -658,6 +718,7 @@ def _build_ospf(parsed: ParsedConfig, params: dict) -> ConfigChangeResult:
         parsed,
         new_area=params.get("new_area", 10),
         ospf_process_id=params.get("ospf_process_id"),
+        config_strategy=params.get("config_strategy", "dual"),
     )
 
 

@@ -34,6 +34,15 @@ import { OperationHistoryPanel } from '@/components/OperationHistoryPanel';
 import { OperationDetailModal } from '@/components/OperationDetailModal';
 import { cn, PIPELINE_STAGES } from '@/lib/utils';
 
+interface ProtocolMismatch {
+  message: string;
+  suggested_use_case: string;
+  suggested_display_name: string;
+  current_display_name: string;
+  confidence: number;
+  matched_keywords?: string[];
+}
+
 export default function DemoPage() {
   const [activeTab, setActiveTab] = useState<'voice' | 'topology' | 'logs' | 'analysis'>('voice');
   const [isRecording, setIsRecording] = useState(false);
@@ -42,8 +51,9 @@ export default function DemoPage() {
   const [selectedLab, setSelectedLab] = useState<string | null>(null);
   const [viewingHistoryOp, setViewingHistoryOp] = useState<Operation | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [protocolMismatch, setProtocolMismatch] = useState<ProtocolMismatch | null>(null);
 
-  const { currentOperation, setCurrentOperation, updateStage, setLoading, setError } = useOperationsStore();
+  const { currentOperation, setCurrentOperation, updateStage, setLoading, setError, isLoading } = useOperationsStore();
   const { messages, connected, subscribe } = useWebSocketStore();
 
   // Determine which operation to display (live or history)
@@ -135,11 +145,12 @@ export default function DemoPage() {
     return () => clearInterval(interval);
   }, [currentOperation?.id, currentOperation?.status, setCurrentOperation]);
 
-  const handleStartOperation = async () => {
+  const handleStartOperation = async (forceMode = false) => {
     if (!transcript.trim()) return;
 
     setLoading(true);
     setError(null);
+    setProtocolMismatch(null);
 
     try {
       const response = await operationsApi.start({
@@ -147,6 +158,7 @@ export default function DemoPage() {
         use_case: selectedUseCase,
         lab_id: selectedLab,
         demo_mode: true,
+        force: forceMode,
       });
 
       setCurrentOperation(response.data);
@@ -155,10 +167,49 @@ export default function DemoPage() {
         subscribe(response.data.id);
       }
     } catch (error: any) {
-      setError(error.response?.data?.detail || 'Failed to start operation');
+      // Handle protocol mismatch error
+      if (error.response?.status === 400 && error.response?.data?.detail?.error === 'PROTOCOL_MISMATCH') {
+        const data = error.response.data.detail;
+        setProtocolMismatch({
+          message: data.message,
+          suggested_use_case: data.suggested_use_case,
+          suggested_display_name: data.suggested_display_name,
+          current_display_name: data.current_display_name,
+          confidence: data.confidence,
+          matched_keywords: data.matched_keywords,
+        });
+      } else {
+        const detail = error.response?.data?.detail;
+        const errorMessage = typeof detail === 'string' ? detail : detail?.message || 'Failed to start operation';
+        setError(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSwitchUseCase = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    if (!protocolMismatch) return;
+    setSelectedUseCase(protocolMismatch.suggested_use_case);
+    setProtocolMismatch(null);
+    // Retry with suggested use case
+    setTimeout(() => handleStartOperation(false), 100);
+  };
+
+  const handleForceUseCase = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    setProtocolMismatch(null);
+    // Force continue with current use case
+    handleStartOperation(true);
+  };
+
+  const handleCancelMismatch = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    setProtocolMismatch(null);
   };
 
   const handleAdvance = async () => {
@@ -375,13 +426,64 @@ export default function DemoPage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                 >
+                  {/* Protocol Mismatch Warning */}
+                  {protocolMismatch && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="mb-4 p-4 bg-background-elevated border border-amber-500/30 rounded-xl"
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-start gap-3">
+                          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="font-semibold text-amber-500">Protocol Mismatch Detected</p>
+                            <p className="text-sm text-text-secondary mt-1">{protocolMismatch.message}</p>
+                            <p className="text-sm text-text-secondary mt-1">
+                              Suggested: <strong className="text-text-primary">{protocolMismatch.suggested_display_name}</strong>
+                              {' '}({Math.round(protocolMismatch.confidence)}% confidence)
+                            </p>
+                            {protocolMismatch.matched_keywords && protocolMismatch.matched_keywords.length > 0 && (
+                              <p className="text-xs text-text-muted mt-1">
+                                Matched keywords: {protocolMismatch.matched_keywords.join(', ')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={handleSwitchUseCase}
+                            className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg text-sm font-medium transition-colors"
+                          >
+                            Switch to {protocolMismatch.suggested_display_name}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleForceUseCase}
+                            className="px-4 py-2 bg-background hover:bg-border text-text-secondary rounded-lg text-sm font-medium transition-colors"
+                          >
+                            Continue with {protocolMismatch.current_display_name}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelMismatch}
+                            className="px-4 py-2 bg-transparent hover:bg-background-elevated text-text-secondary rounded-lg text-sm font-medium transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
                   <VoiceInput
                     transcript={transcript}
                     setTranscript={setTranscript}
                     isRecording={isRecording}
                     setIsRecording={setIsRecording}
                     onStart={handleStartOperation}
-                    isLoading={useOperationsStore.getState().isLoading}
+                    isLoading={isLoading}
                   />
                 </motion.div>
               )}

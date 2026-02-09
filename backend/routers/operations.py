@@ -27,6 +27,7 @@ from models.operations import (
 from db.models import MCPServer
 from services.cml_client import CMLClient
 from services.websocket_manager import manager
+from services.use_case_matcher import validate_use_case_selection
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -44,6 +45,7 @@ async def start_operation(
     the 9-stage pipeline process. The operation runs asynchronously,
     and status can be tracked via the GET endpoint or WebSocket.
     """
+    print(f"[DEBUG] Starting new operation: text={operation.text}, use_case={operation.use_case}")
     logger.info("Starting new operation", text=operation.text, use_case=operation.use_case)
 
     # Validate input
@@ -68,6 +70,71 @@ async def start_operation(
                 detail=f"Use case '{operation.use_case}' not found or inactive",
             )
         use_case_name = use_case.name
+    else:
+        # Load default use case
+        result = await db.execute(
+            select(UseCase).where(UseCase.name == use_case_name, UseCase.is_active == True)
+        )
+        use_case = result.scalar_one_or_none()
+
+    # Pre-validation: Check if input text matches selected use case
+    # Only validate if we have text input, use case exists, and force mode is not enabled
+    print(f"[DEBUG] Pre-validation: has_text={bool(operation.text)}, has_use_case={bool(use_case)}, force={getattr(operation, 'force', False)}")
+    logger.info(
+        "Pre-validation check",
+        has_text=bool(operation.text),
+        has_use_case=bool(use_case),
+        force_mode=getattr(operation, 'force', False),
+        use_case_name=use_case.name if use_case else None,
+    )
+
+    if operation.text and use_case and not getattr(operation, 'force', False):
+        print("[DEBUG] Inside validation block - about to run validation")
+        logger.info(
+            "Running use case validation",
+            input=operation.text,
+            selected=use_case.name,
+        )
+        # Get all active use cases for matching
+        all_use_cases_result = await db.execute(
+            select(UseCase).where(UseCase.is_active == True)
+        )
+        all_use_cases = all_use_cases_result.scalars().all()
+
+        # Debug: Log loaded use cases and their trigger keywords
+        print(f"[DEBUG] Loaded {len(all_use_cases)} use cases")
+        for uc in all_use_cases:
+            print(f"  - {uc.name}: keywords={uc.trigger_keywords} (type={type(uc.trigger_keywords)})")
+        print(f"[DEBUG] Selected use case '{use_case.name}' keywords: {use_case.trigger_keywords}")
+        print(f"[DEBUG] Input text: '{operation.text}'")
+        print(f"[DEBUG] Calling validator with {len(all_use_cases)} use cases")
+
+        validation = validate_use_case_selection(operation.text, use_case, all_use_cases)
+        print(f"[DEBUG] Validation result: {validation}")
+
+        logger.info("Validation result", is_valid=validation.get("is_valid"))
+
+        if not validation["is_valid"]:
+            # Return error with suggestion
+            logger.warning(
+                "Protocol mismatch detected",
+                input=operation.text,
+                selected=use_case.name,
+                suggested=validation.get("suggested_use_case"),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": validation["error"],
+                    "message": validation["message"],
+                    "suggested_use_case": validation["suggested_use_case"],
+                    "suggested_display_name": validation["suggested_display_name"],
+                    "confidence": validation["confidence"],
+                    "current_use_case": validation["current_use_case"],
+                    "current_display_name": validation["current_display_name"],
+                    "matched_keywords": validation.get("matched_keywords", []),
+                },
+            )
 
     # Create pipeline job with new stage order
     # Stages: voice_input -> intent_parsing -> config_generation -> ai_advice ->
@@ -78,6 +145,7 @@ async def start_operation(
         use_case_name=use_case_name,
         input_text=operation.text or "",
         input_audio_url=operation.audio_url,
+        selected_lab_id=operation.lab_id,
         current_stage='voice_input',
         status='queued',
         stages_data={

@@ -324,6 +324,8 @@ async def update_use_case(
         uc.splunk_index = update.splunk_index
     if update.convergence_wait_seconds is not None:
         uc.convergence_wait_seconds = update.convergence_wait_seconds
+    if update.servicenow_enabled is not None:
+        uc.servicenow_enabled = update.servicenow_enabled
     if update.explanation_template is not None:
         uc.explanation_template = update.explanation_template
     if update.impact_description is not None:
@@ -389,7 +391,7 @@ async def list_users(
             username=user.username,
             email=user.email,
             full_name=user.full_name,
-            role=user.role.value,
+            role=user.role if isinstance(user.role, str) else user.role.value,
             is_active=user.is_active,
             last_login=user.last_login,
             created_at=user.created_at,

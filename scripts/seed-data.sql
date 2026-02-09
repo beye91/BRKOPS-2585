@@ -90,6 +90,7 @@ INSERT INTO use_cases (
     pre_checks,
     post_checks,
     risk_profile,
+    ospf_config_strategy,
     is_active,
     sort_order
 ) VALUES (
@@ -198,6 +199,7 @@ Provide analysis in JSON format:
     '["Verify current OSPF neighbor state on all target devices", "Confirm no active maintenance on affected devices", "Review per-device rollback commands"]',
     '["Verify OSPF neighbors re-establish", "Check routing table convergence", "Confirm no routing loops"]',
     '{"risk_factors": ["OSPF area change causes temporary neighbor adjacency reset"], "mitigation_steps": ["Ensure backup paths exist", "Apply during maintenance window", "Per-device rollback ready"], "affected_services": ["OSPF routing", "Inter-area traffic"]}',
+    'dual',
     true,
     1
 ) ON CONFLICT (name) DO UPDATE SET

@@ -120,18 +120,37 @@ export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused
         {/* Rollback Required Banner */}
         {(() => {
           const validation = stagesData.ai_validation?.data;
-          const notificationResults = stagesData.notifications?.data?.results;
-          const snowResult = notificationResults?.find((r: any) => r.channel === 'servicenow');
           const isRollbackRequired = validation?.rollback_recommended ||
             validation?.validation_status === 'FAILED' ||
             validation?.validation_status === 'ROLLBACK_REQUIRED';
 
           if (!isRollbackRequired || !stagesData.ai_validation?.status) return null;
 
-          let snowMessage = '';
-          if (snowResult) {
+          const notificationStage = stagesData.notifications;
+          const notificationResults = notificationStage?.data?.results;
+          const snowResult = notificationResults?.find((r: any) => r.channel === 'servicenow');
+          const notificationInProgress = notificationStage?.status === 'running';
+          const notificationComplete = notificationStage?.status === 'completed';
+
+          let snowMessage: React.ReactNode = '';
+          if (notificationInProgress) {
+            snowMessage = ' Creating ServiceNow ticket...';
+          } else if (notificationComplete && snowResult) {
             if (snowResult.ticket_number) {
-              snowMessage = ` ServiceNow: ${snowResult.ticket_number}`;
+              snowMessage = (
+                <span>
+                  {' ServiceNow: '}
+                  <a
+                    href={snowResult.ticket_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-white underline hover:text-white/80 font-mono"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {snowResult.ticket_number}
+                  </a>
+                </span>
+              );
             } else if (!snowResult.success) {
               snowMessage = ` ServiceNow: ${snowResult.error || 'Failed to create ticket'}`;
             }
@@ -142,7 +161,12 @@ export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused
               <AlertBanner
                 severity="critical"
                 title="ROLLBACK REQUIRED"
-                message={`AI validation detected critical issues.${snowMessage}`}
+                message={
+                  <span>
+                    AI validation detected critical issues.
+                    {snowMessage}
+                  </span>
+                }
                 onAction={handleRollbackClick}
                 actionLabel={isRollingBack ? 'Rolling back...' : 'Initiate Rollback'}
               />

@@ -984,6 +984,8 @@ function UseCaseModal({
     risk_factors: [] as string[],
     mitigation_steps: [] as string[],
     affected_services: [] as string[],
+    ospf_config_strategy: 'dual',
+    servicenow_enabled: false,
     is_active: true,
   });
 
@@ -1009,6 +1011,8 @@ function UseCaseModal({
         risk_factors: rp.risk_factors || [],
         mitigation_steps: rp.mitigation_steps || [],
         affected_services: rp.affected_services || [],
+        ospf_config_strategy: useCase.ospf_config_strategy || 'dual',
+        servicenow_enabled: useCase.servicenow_enabled ?? false,
         is_active: useCase.is_active ?? true,
       });
     } else {
@@ -1031,6 +1035,8 @@ function UseCaseModal({
         risk_factors: [],
         mitigation_steps: [],
         affected_services: [],
+        ospf_config_strategy: 'dual',
+        servicenow_enabled: false,
         is_active: true,
       });
     }
@@ -1070,6 +1076,7 @@ function UseCaseModal({
       llm_model: formData.llm_model || null,
       explanation_template: formData.explanation_template || null,
       impact_description: formData.impact_description || null,
+      servicenow_enabled: formData.servicenow_enabled,
       splunk_query_config: { query_type: splunk_query_type },
       pre_checks: formData.pre_checks.length > 0 ? formData.pre_checks : null,
       post_checks: formData.post_checks.length > 0 ? formData.post_checks : null,
@@ -1345,6 +1352,25 @@ function UseCaseModal({
               </button>
             </div>
 
+            {/* ServiceNow Integration Toggle */}
+            <div className="border-t border-border pt-4 mt-4">
+              <div className="flex items-center gap-3 mb-2">
+                <input
+                  type="checkbox"
+                  id="servicenow_enabled"
+                  checked={formData.servicenow_enabled}
+                  onChange={(e) => setFormData({ ...formData, servicenow_enabled: e.target.checked })}
+                  className="rounded"
+                />
+                <label htmlFor="servicenow_enabled" className="text-sm font-medium">
+                  Enable ServiceNow Ticket Creation
+                </label>
+              </div>
+              <p className="text-xs text-text-muted ml-6">
+                Automatically create ServiceNow incidents when AI validation detects issues or recommends rollback.
+              </p>
+            </div>
+
             {/* Risk Factors */}
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-2">
@@ -1433,18 +1459,37 @@ function UseCaseModal({
               className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary"
             />
           </div>
-          <div className="flex items-center gap-3 pt-8">
-            <input
-              type="checkbox"
-              id="uc_is_active"
-              checked={formData.is_active}
-              onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-              className="rounded"
-            />
-            <label htmlFor="uc_is_active" className="text-sm">
-              Active
-            </label>
-          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-text-secondary mb-2">
+            OSPF Configuration Strategy
+          </label>
+          <select
+            value={formData.ospf_config_strategy || 'dual'}
+            onChange={(e) => setFormData({ ...formData, ospf_config_strategy: e.target.value })}
+            className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary"
+          >
+            <option value="dual">Dual Mode (Recommended) - Both network statements and interface commands</option>
+            <option value="network_only">Network Statements Only (Legacy)</option>
+            <option value="interface_only">Interface Commands Only (Modern)</option>
+          </select>
+          <p className="text-xs text-text-muted mt-1">
+            Dual mode provides maximum compatibility and enables smooth migration from network statements to modern interface-level configuration.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            id="uc_is_active"
+            checked={formData.is_active}
+            onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+            className="rounded"
+          />
+          <label htmlFor="uc_is_active" className="text-sm">
+            Active
+          </label>
         </div>
 
         <div className="flex gap-3 pt-4">

@@ -1,0 +1,28 @@
+Total messages: 8 (Errors: 0, Warnings: 0)
+
+[LOG] WebSocket connected @ http://198.18.134.22:3003/_next/static/chunks/app/layout-01b0691bc45d68c8.js:0
+[LOG] [DEBUG] handleStartOperation called {transcript: I want to change OSPF configuration on Router-1 to use area 10, forceMode: t} @ http://198.18.134.22:3003/_next/static/chunks/app/demo/page-b862021b6ba812e1.js:0
+[LOG] [DEBUG] Setting loading to true @ http://198.18.134.22:3003/_next/static/chunks/app/demo/page-b862021b6ba812e1.js:0
+[LOG] [DEBUG] Making API call {text: I want to change OSPF configuration on Router-1 to use area 10, use_case: ospf_configuration_change, lab_id: null, demo_mode: true, force: t} @ http://198.18.134.22:3003/_next/static/chunks/app/demo/page-b862021b6ba812e1.js:0
+[LOG] [DEBUG] API call error TypeError: Converting circular structure to JSON
+    --> starting at object with constructor 'HTMLButtonElement'
+    |     property '__reactFiber$gzdh55r3bg8' -> object with constructor 'is'
+    --- property 'stateNode' closes the circle
+    at stringify (<anonymous>)
+    at http://198.18.134.22:3003/_next/static/chunks/644-12769fc0524ad9bc.js:41:45338
+    at th.transformRequest (http://198.18.134.22:3003/_next/static/chunks/644-12769fc0524ad9bc.js:41:45342)
+    at http://198.18.134.22:3003/_next/static/chunks/644-12769fc0524ad9bc.js:41:49529
+    at Object.T [as forEach] (http://198.18.134.22:3003/_next/static/chunks/644-12769fc0524ad9bc.js:41:34678)
+    at Object.tb (http://198.18.134.22:3003/_next/static/chunks/644-12769fc0524ad9bc.js:41:49503)
+    at tI.tk (http://198.18.134.22:3003/_next/static/chunks/644-12769fc0524ad9bc.js:41:55682)
+    at tI._request (http://198.18.134.22:3003/_next/static/chunks/644-12769fc0524ad9bc.js:41:59663)
+    at tI.request (http://198.18.134.22:3003/_next/static/chunks/644-12769fc0524ad9bc.js:41:58229)
+    at tI.post (http://198.18.134.22:3003/_next/static/chunks/644-12769fc0524ad9bc.js:41:60189)
+    at tI.request (http://198.18.134.22:3003/_next/static/chunks/644-12769fc0524ad9bc.js:41:58311)
+    at async ew (http://198.18.134.22:3003/_next/static/chunks/app/demo/page-b862021b6ba812e1.js:1:81941) @ http://198.18.134.22:3003/_next/static/chunks/app/demo/page-b862021b6ba812e1.js:0
+[LOG] [DEBUG] Error response undefined @ http://198.18.134.22:3003/_next/static/chunks/app/demo/page-b862021b6ba812e1.js:0
+[LOG] [DEBUG] Error message Converting circular structure to JSON
+    --> starting at object with constructor 'HTMLButtonElement'
+    |     property '__reactFiber$gzdh55r3bg8' -> object with constructor 'is'
+    --- property 'stateNode' closes the circle @ http://198.18.134.22:3003/_next/static/chunks/app/demo/page-b862021b6ba812e1.js:0
+[LOG] [DEBUG] Finally block - setting loading to false @ http://198.18.134.22:3003/_next/static/chunks/app/demo/page-b862021b6ba812e1.js:0
