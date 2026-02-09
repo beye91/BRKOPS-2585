@@ -61,6 +61,122 @@ async def validate_mcp_servers(db: AsyncSession) -> Tuple[bool, List[str]]:
 
 
 # =============================================================================
+# Lab Resolution Helper
+# =============================================================================
+async def get_target_lab_id(job: PipelineJob, use_case: Optional[UseCase], client: CMLClient) -> Optional[str]:
+    """
+    Resolve lab ID with precedence:
+    1. User selection (job.selected_lab_id) - HIGHEST
+    2. Use case default (use_case.cml_target_lab)
+    3. First available lab (fallback)
+
+    Args:
+        job: Pipeline job with optional selected_lab_id
+        use_case: Use case with optional cml_target_lab
+        client: CML client instance
+
+    Returns:
+        Lab ID string or None if no labs available
+    """
+    # Priority 1: User selection
+    if job.selected_lab_id:
+        logger.info("Using user-selected lab", lab_id=job.selected_lab_id, job_id=str(job.id))
+        return job.selected_lab_id
+
+    # Priority 2: Use case default
+    if use_case and use_case.cml_target_lab:
+        logger.info("Using use case default lab", lab_id=use_case.cml_target_lab, job_id=str(job.id))
+        return use_case.cml_target_lab
+
+    # Priority 3: First available lab
+    try:
+        labs = await client.get_labs()
+        if labs:
+            first_lab_id = labs[0].get("id")
+            logger.info("Using first available lab", lab_id=first_lab_id, job_id=str(job.id))
+            return first_lab_id
+    except Exception as e:
+        logger.error("Failed to fetch labs", error=str(e), job_id=str(job.id))
+
+    return None
+
+
+# =============================================================================
+# Lab Context Builder for LLM
+# =============================================================================
+async def build_lab_context(
+    client: CMLClient,
+    lab_id: str,
+    target_devices: List[str],
+    max_chars: int = 12000,
+) -> Dict[str, Any]:
+    """
+    Build comprehensive lab context for LLM.
+
+    Fetches configs from ALL devices in the lab to give the LLM
+    full topology awareness, not just the single target device.
+
+    Args:
+        client: CML client instance
+        lab_id: Lab UUID
+        target_devices: List of target device labels
+        max_chars: Maximum total characters (truncate if exceeded)
+
+    Returns:
+        Dictionary with lab topology and all device configs
+    """
+    try:
+        nodes = await client.get_nodes(lab_id)
+
+        # Fetch ALL device configs in parallel
+        async def _fetch_config(label: str) -> Tuple[str, str]:
+            try:
+                cfg = await client.run_command(lab_id, label, "show running-config")
+                return label, cfg
+            except Exception as e:
+                logger.warning("Failed to fetch config", device=label, error=str(e))
+                return label, ""
+
+        tasks = [_fetch_config(n.get("label")) for n in nodes if n.get("label")]
+        results = await asyncio.gather(*tasks)
+        device_configs = {label: cfg for label, cfg in results}
+
+        # Smart truncation if total exceeds max_chars
+        total_chars = sum(len(c) for c in device_configs.values())
+        if total_chars > max_chars:
+            # Truncate each config proportionally
+            chars_per_device = max_chars // len(device_configs)
+            device_configs = {
+                label: cfg[:chars_per_device] if len(cfg) > chars_per_device else cfg
+                for label, cfg in device_configs.items()
+            }
+
+        return {
+            "target_devices": target_devices,
+            "lab_topology": {
+                "total_devices": len(nodes),
+                "devices": [
+                    {
+                        "label": n.get("label"),
+                        "type": n.get("node_definition"),
+                        "state": n.get("state"),
+                    }
+                    for n in nodes
+                ]
+            },
+            "device_configs": device_configs,
+        }
+    except Exception as e:
+        logger.error("Failed to build lab context", error=str(e), lab_id=lab_id)
+        return {
+            "target_devices": target_devices,
+            "lab_topology": {"total_devices": 0, "devices": []},
+            "device_configs": {},
+            "error": str(e),
+        }
+
+
+# =============================================================================
 # Network State Collection Helper
 # =============================================================================
 async def collect_network_state(
@@ -676,6 +792,12 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
     action = intent.get("action", "")
     params = intent.get("parameters", {})
 
+    # Add OSPF config strategy from use case
+    if use_case and hasattr(use_case, 'ospf_config_strategy'):
+        params['config_strategy'] = use_case.ospf_config_strategy
+    else:
+        params.setdefault('config_strategy', 'dual')
+
     # --- Fetch running configs from CML ---
     running_configs = {}
     try:
@@ -686,11 +808,7 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
 
         if cml_server and target_devices:
             client = CMLClient(cml_server.endpoint, cml_server.auth_config)
-            lab_id = use_case.cml_target_lab if use_case else None
-            if not lab_id:
-                labs = await client.get_labs()
-                if labs:
-                    lab_id = labs[0].get("id")
+            lab_id = await get_target_lab_id(job, use_case, client)
 
             if lab_id:
                 # Fetch running configs in parallel
@@ -879,13 +997,8 @@ async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase,
         config = job.stages_data.get("config_generation", {}).get("data", {})
         intent = job.stages_data.get("intent_parsing", {}).get("data", {})
 
-        # Find target lab
-        lab_id = use_case.cml_target_lab if use_case else None
-
-        if not lab_id:
-            labs = await client.get_labs()
-            if labs:
-                lab_id = labs[0].get("id")
+        # Find target lab with precedence: user selection > use case default > first available
+        lab_id = await get_target_lab_id(job, use_case, client)
 
         if not lab_id:
             return {"deployed": False, "error": "No lab available"}
@@ -1199,6 +1312,53 @@ async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db,
     return monitoring_data
 
 
+def normalize_splunk_timestamp(timestamp_value: Any) -> str:
+    """
+    Normalize Splunk timestamp to ISO 8601 format.
+
+    Handles:
+    - Unix epoch (seconds): 1707123456
+    - Unix epoch (milliseconds): 1707123456789
+    - ISO 8601 strings: "2024-02-05T14:30:00Z"
+    - Malformed values: Returns current time with warning
+
+    Returns:
+        ISO 8601 formatted timestamp string
+    """
+    from datetime import datetime, timezone
+
+    # Handle None/empty
+    if not timestamp_value:
+        logger.warning("Empty timestamp, using current time")
+        return datetime.now(timezone.utc).isoformat()
+
+    # Try parsing as Unix epoch (seconds or milliseconds)
+    try:
+        num = float(timestamp_value)
+        # Epoch seconds (10 digits)
+        if 1e9 < num < 1e12:
+            dt = datetime.fromtimestamp(num, tz=timezone.utc)
+            return dt.isoformat()
+        # Epoch milliseconds (13 digits)
+        elif 1e12 < num < 1e15:
+            dt = datetime.fromtimestamp(num / 1000, tz=timezone.utc)
+            return dt.isoformat()
+    except (ValueError, TypeError):
+        pass
+
+    # Try parsing as ISO string
+    try:
+        dt = datetime.fromisoformat(str(timestamp_value).replace('Z', '+00:00'))
+        return dt.isoformat()
+    except (ValueError, TypeError):
+        pass
+
+    # Fallback: log warning and return current time
+    logger.warning("Malformed timestamp, using current time",
+                   raw_value=str(timestamp_value))
+    return datetime.now(timezone.utc).isoformat()
+
+
 async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
     """Query Splunk for post-change logs."""
     logger.info("Querying Splunk", job_id=str(job.id))
@@ -1241,11 +1401,18 @@ async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase
         else:
             results = await client.get_device_logs(device, "-5m") if device else {}
 
+        # Normalize timestamps for frontend display
+        normalized_results = []
+        for log_entry in results.get("results", [])[:50]:
+            if "_time" in log_entry:
+                log_entry["_time"] = normalize_splunk_timestamp(log_entry["_time"])
+            normalized_results.append(log_entry)
+
         return {
             "queried": True,
             "query": results.get("query", ""),
             "result_count": results.get("result_count", 0),
-            "results": results.get("results", [])[:50],  # Limit results
+            "results": normalized_results,
         }
 
     except Exception as e:
@@ -1553,16 +1720,10 @@ async def process_baseline_collection(ctx: dict, job: PipelineJob, use_case: Use
     if not target_devices:
         target_devices = ["Router-1"]
 
-    # Get lab ID from use case or find the first available lab
-    lab_id = use_case.cml_target_lab if use_case else None
-
+    # Get lab ID with precedence: user selection > use case default > first available
     try:
         client = CMLClient(cml_server.endpoint, cml_server.auth_config)
-
-        if not lab_id:
-            labs = await client.get_labs()
-            if labs:
-                lab_id = labs[0].get("id")
+        lab_id = await get_target_lab_id(job, use_case, client)
 
         if not lab_id:
             return {

@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 
 interface TopologyProps {
   affectedDevices?: string[];
+  labId?: string | null;
 }
 
 // Custom node component
@@ -82,32 +83,35 @@ function getLabLabel(lab: any): string {
   return label;
 }
 
-export function Topology({ affectedDevices = [] }: TopologyProps) {
+export function Topology({ affectedDevices = [], labId }: TopologyProps) {
   const [selectedLab, setSelectedLab] = useState<string | null>(null);
+
+  // Use provided labId prop, otherwise use internal state
+  const activeLabId = labId || selectedLab;
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
   // Fetch labs
   const { data: labsData, isLoading: labsLoading, error: labsError, refetch: refetchLabs } = useQuery({
     queryKey: ['cml-labs'],
-    queryFn: () => mcpApi.getCMLLabs().then((res) => res.data),
+    queryFn: () => mcpApi.getCMLLabs().then((res) => res.data.labs || []),
     retry: 1,
   });
 
   // Fetch topology for selected lab
   const { data: topologyData, isLoading: topologyLoading, refetch: refetchTopology } = useQuery({
-    queryKey: ['cml-topology', selectedLab],
-    queryFn: () => mcpApi.getCMLTopology(selectedLab!).then((res) => res.data),
-    enabled: !!selectedLab,
+    queryKey: ['cml-topology', activeLabId],
+    queryFn: () => mcpApi.getCMLTopology(activeLabId!).then((res) => res.data),
+    enabled: !!activeLabId,
     retry: 1,
   });
 
-  // Auto-select first lab
+  // Auto-select first lab (only if no labId prop provided)
   useEffect(() => {
-    if (labsData?.labs?.length > 0 && !selectedLab) {
-      setSelectedLab(labsData.labs[0].id);
+    if (!labId && labsData && labsData.length > 0 && !selectedLab) {
+      setSelectedLab(labsData[0].id);
     }
-  }, [labsData, selectedLab]);
+  }, [labId, labsData, selectedLab]);
 
   // Update nodes and edges when topology changes
   useEffect(() => {
@@ -131,15 +135,27 @@ export function Topology({ affectedDevices = [] }: TopologyProps) {
       },
     }));
 
-    // Create edges
-    const newEdges: Edge[] = topologyData.links.map((link: any) => ({
-      id: link.id,
-      source: link.source,
-      target: link.target,
-      label: `${link.interface_a || ''} - ${link.interface_b || ''}`,
-      style: { stroke: '#3A4554' },
-      labelStyle: { fill: '#8B95A5', fontSize: 10 },
-    }));
+    // Create edges with validation
+    const newEdges: Edge[] = topologyData.links
+      .filter((link: any) => {
+        // Filter invalid links
+        if (!link.source || !link.target) {
+          console.warn('Skipping link with missing endpoints:', link);
+          return false;
+        }
+        return true;
+      })
+      .map((link: any) => ({
+        id: link.id,
+        source: link.source,
+        target: link.target,
+        label: `${link.interface_a || ''} - ${link.interface_b || ''}`,
+        style: { stroke: '#3A4554' },
+        labelStyle: { fill: '#8B95A5', fontSize: 10 },
+      }));
+
+    // Log edge count for debugging
+    console.log(`Topology: ${newNodes.length} nodes, ${newEdges.length} edges`);
 
     setNodes(newNodes);
     setEdges(newEdges);
@@ -176,13 +192,13 @@ export function Topology({ affectedDevices = [] }: TopologyProps) {
       <div className="flex items-center justify-between p-4 border-b border-border">
         <div className="flex items-center gap-4">
           <h2 className="font-semibold">Network Topology</h2>
-          {labsData?.labs && (
+          {!labId && labsData && labsData.length > 0 && (
             <select
               value={selectedLab || ''}
               onChange={(e) => setSelectedLab(e.target.value)}
               className="px-3 py-1.5 bg-background border border-border rounded-lg text-sm"
             >
-              {labsData.labs.map((lab: any) => (
+              {labsData.map((lab: any) => (
                 <option key={lab.id} value={lab.id}>
                   {getLabLabel(lab)}
                 </option>
@@ -199,7 +215,14 @@ export function Topology({ affectedDevices = [] }: TopologyProps) {
       </div>
 
       {/* React Flow Canvas */}
-      <div className="h-[calc(100%-60px)]">
+      <div className="h-[calc(100%-60px)] relative">
+        {/* Warning if links are incomplete */}
+        {topologyData?.links && edges.length < topologyData.links.length && (
+          <div className="absolute top-4 right-4 z-10 px-3 py-2 bg-warning/20 border border-warning rounded-lg text-sm">
+            ⚠️ Topology incomplete: {topologyData.links.length - edges.length} links filtered
+          </div>
+        )}
+
         {topologyLoading ? (
           <div className="h-full flex items-center justify-center">
             <Loader2 className="w-8 h-8 text-primary animate-spin" />

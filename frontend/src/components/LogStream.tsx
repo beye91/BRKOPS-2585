@@ -79,6 +79,18 @@ export function LogStream({ logs, operationStatus, operationStage }: LogStreamPr
     }
   };
 
+  const formatLogMessage = (message: string): React.ReactNode => {
+    // Highlight OSPF errors in red
+    const ospfKeywords = /(%OSPF-[45]-\w+|ERROR|FAILED|DOWN)/gi;
+    const parts = message.split(ospfKeywords);
+
+    return parts.map((part, i) =>
+      ospfKeywords.test(part) ? (
+        <span key={i} className="text-error font-semibold">{part}</span>
+      ) : part
+    );
+  };
+
   return (
     <div className="bg-background-elevated rounded-xl border border-border overflow-hidden">
       {/* Header */}
@@ -193,12 +205,21 @@ export function LogStream({ logs, operationStatus, operationStage }: LogStreamPr
                         {log._time && (
                           <span className="text-xs text-text-muted font-mono">
                             {(() => {
-                              const t = Number(log._time);
-                              if (!isNaN(t) && t > 1e9 && t < 1e12) {
-                                return new Date(t * 1000).toLocaleTimeString();
+                              try {
+                                const date = new Date(log._time);
+                                // Format as: Feb 5, 14:30:45 PST
+                                return date.toLocaleString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit',
+                                  timeZoneName: 'short',
+                                });
+                              } catch (e) {
+                                // Fallback to raw value if parsing fails
+                                return log._time;
                               }
-                              const d = new Date(log._time);
-                              return isNaN(d.getTime()) ? '' : d.toLocaleTimeString();
                             })()}
                           </span>
                         )}
@@ -212,7 +233,7 @@ export function LogStream({ logs, operationStatus, operationStage }: LogStreamPr
                         )}
                       </div>
                       <pre className="text-sm text-text-primary font-mono whitespace-pre-wrap break-all">
-                        {log._raw || log.message || JSON.stringify(log, null, 2)}
+                        {formatLogMessage(log._raw || log.message || JSON.stringify(log, null, 2))}
                       </pre>
                     </div>
                   </div>

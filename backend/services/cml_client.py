@@ -471,6 +471,38 @@ class CMLClient:
     # ==========================================================================
     # Topology
     # ==========================================================================
+    def _extract_node_from_link(self, link: Dict, side: str) -> Optional[str]:
+        """
+        Extract node ID from link object with multiple fallback patterns.
+
+        Args:
+            link: Link object from CML MCP
+            side: Either 'a' or 'b' for node_a/node_b
+
+        Returns:
+            Node ID or None if not found
+        """
+        # Try direct fields first
+        patterns = [
+            f"node_{side}",           # node_a, node_b
+            f"node_{side}_id",        # node_a_id, node_b_id
+        ]
+
+        for pattern in patterns:
+            if value := link.get(pattern):
+                return value
+
+        # Try nested interface structure
+        interface_key = f"interface_{side}"
+        if interface := link.get(interface_key):
+            if isinstance(interface, dict):
+                # Try various node reference fields
+                for field in ["node", "node_id", "id"]:
+                    if value := interface.get(field):
+                        return value
+
+        return None
+
     async def get_topology(self, lab_id: str) -> Dict[str, Any]:
         """
         Get topology graph data for visualization.
@@ -492,6 +524,12 @@ class CMLClient:
             links_result = await self._call_tool("get_all_links_for_lab", {"lid": lab_id})
             links = links_result if isinstance(links_result, list) else []
 
+            # DEBUG: Log raw link structure
+            logger.info("CML topology links retrieved",
+                        lab_id=lab_id,
+                        link_count=len(links),
+                        sample_link=links[0] if links else None)
+
             # Transform for frontend visualization
             graph_nodes = []
             for node in nodes:
@@ -505,14 +543,50 @@ class CMLClient:
                 })
 
             graph_links = []
+            node_ids = {node.get("id") for node in nodes}  # Set of valid node IDs
+            filtered_links = []
+
             for link in links:
+                # DEBUG: Log each link before transformation
+                logger.debug("Processing link",
+                             link_id=link.get("id"),
+                             raw_fields=list(link.keys()))
+
+                source = self._extract_node_from_link(link, "a")
+                target = self._extract_node_from_link(link, "b")
+
+                # Validate node IDs exist
+                if not source or not target:
+                    logger.warning("Link missing endpoints",
+                                   link_id=link.get("id"),
+                                   source=source,
+                                   target=target,
+                                   raw_link=link)
+                    filtered_links.append(link.get("id"))
+                    continue
+
+                if source not in node_ids or target not in node_ids:
+                    logger.warning("Link references unknown nodes",
+                                   link_id=link.get("id"),
+                                   source=source,
+                                   target=target,
+                                   valid_nodes=list(node_ids))
+                    filtered_links.append(link.get("id"))
+                    continue
+
+                # Valid link - add to graph
                 graph_links.append({
                     "id": link.get("id"),
-                    "source": link.get("node_a") if "node_a" in link else link.get("interface_a", {}).get("node"),
-                    "target": link.get("node_b") if "node_b" in link else link.get("interface_b", {}).get("node"),
+                    "source": source,
+                    "target": target,
                     "interface_a": link.get("interface_a"),
                     "interface_b": link.get("interface_b"),
                 })
+
+            logger.info("Topology links processed",
+                        total_links=len(links),
+                        valid_links=len(graph_links),
+                        filtered_links=len(filtered_links))
 
             return {
                 "lab_id": lab_id,
