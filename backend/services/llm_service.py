@@ -625,14 +625,33 @@ ROLLBACK DECISION CRITERIA:
 - ACCEPTABLE: Minor warnings but network stable, no loss of connectivity
 - SUCCESS: Change applied cleanly, network converged as expected
 
-You MUST provide a clear recommendation: "ROLLBACK REQUIRED", "ACCEPTABLE", or "SUCCESS".
+REQUIRED JSON STRUCTURE (you MUST include ALL fields exactly):
+{
+  "validation_status": "PASSED" | "WARNING" | "FAILED",
+  "overall_score": <number 0-100>,
+  "rollback_recommended": <boolean>,
+  "rollback_reason": "<string explaining why rollback is/isn't recommended>",
+  "findings": [
+    {
+      "category": "<string: Network State|Deployment|Logs|Configuration>",
+      "status": "<string: ok|warning|critical>",
+      "severity": "<string: info|warning|critical>",
+      "message": "<string: description of finding>"
+    }
+  ],
+  "summary": "<string: overall assessment>",
+  "recommendation": "<string: detailed recommendation>"
+}
 
-Always respond with valid JSON including:
-- validation_status: "PASSED|WARNING|FAILED"
-- rollback_recommended: boolean
-- rollback_reason: string explaining why rollback is needed (if applicable)
-- findings: array of specific issues found
-- recommendation: clear action for operator"""
+CRITICAL RULES:
+1. If OSPF neighbors decreased (change < 0): validation_status MUST be "FAILED", rollback_recommended MUST be true
+2. If interfaces went down (change < 0): validation_status MUST be "FAILED", rollback_recommended MUST be true
+3. If Splunk shows critical errors: validation_status MUST be "WARNING" or "FAILED"
+4. overall_score: 100 = perfect, 0 = complete failure
+5. Include at least 3 findings in the findings array
+6. Each finding MUST have all 4 fields: category, status, severity, message
+
+Return ONLY the JSON object, no additional text."""
 
         response = await self.complete(
             prompt=prompt,
@@ -641,13 +660,122 @@ Always respond with valid JSON including:
         )
 
         try:
-            return json.loads(response)
+            validation_dict = json.loads(response)
         except json.JSONDecodeError:
             import re
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
-                return json.loads(json_match.group())
-            raise ValueError(f"Failed to parse JSON from response: {response}")
+                try:
+                    validation_dict = json.loads(json_match.group())
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse LLM validation response: {e}")
+                    logger.error(f"Raw response: {response[:500]}")
+                    # Fallback to demo-style validation
+                    return self._fallback_validation(monitoring_diff)
+            else:
+                logger.error(f"No JSON found in LLM response: {response[:500]}")
+                return self._fallback_validation(monitoring_diff)
+
+        # VALIDATION: Ensure all required fields exist
+        required_fields = {
+            'validation_status': str,
+            'overall_score': (int, float),
+            'rollback_recommended': bool,
+            'findings': list,
+            'summary': str,
+            'recommendation': str,
+        }
+
+        for field, expected_type in required_fields.items():
+            if field not in validation_dict:
+                # Set default value based on type
+                if expected_type == str:
+                    validation_dict[field] = f"Missing {field}"
+                elif expected_type in (int, float) or expected_type == (int, float):
+                    validation_dict[field] = 50  # Middle score
+                elif expected_type == bool:
+                    validation_dict[field] = False
+                elif expected_type == list:
+                    validation_dict[field] = []
+                logger.warning(f"Missing required field '{field}' in LLM validation response, using default")
+            elif not isinstance(validation_dict[field], expected_type):
+                # Type mismatch - fix it
+                if field == 'overall_score':
+                    try:
+                        validation_dict[field] = int(validation_dict[field])
+                    except (ValueError, TypeError):
+                        validation_dict[field] = 50
+                elif field == 'rollback_recommended':
+                    validation_dict[field] = bool(validation_dict[field])
+                elif field == 'findings' and not isinstance(validation_dict[field], list):
+                    validation_dict[field] = [{"category": "Error", "status": "warning",
+                                              "message": str(validation_dict[field]),
+                                              "severity": "warning"}]
+                logger.warning(f"Field '{field}' has incorrect type in LLM validation response, converted")
+
+        # Validate findings structure
+        if validation_dict['findings']:
+            validated_findings = []
+            for finding in validation_dict['findings']:
+                if isinstance(finding, dict):
+                    # Ensure all required finding fields exist
+                    validated_finding = {
+                        'category': finding.get('category', 'General'),
+                        'status': finding.get('status', 'info'),
+                        'severity': finding.get('severity', 'info'),
+                        'message': finding.get('message', 'No message provided')
+                    }
+                    validated_findings.append(validated_finding)
+                else:
+                    # Invalid finding format, convert to dict
+                    validated_findings.append({
+                        'category': 'General',
+                        'status': 'warning',
+                        'severity': 'warning',
+                        'message': str(finding)
+                    })
+            validation_dict['findings'] = validated_findings
+        else:
+            # No findings, add a default one
+            validation_dict['findings'] = [{
+                'category': 'Validation',
+                'status': 'ok',
+                'severity': 'info',
+                'message': 'No specific findings reported'
+            }]
+
+        # If no rollback_reason, generate one
+        if 'rollback_reason' not in validation_dict:
+            validation_dict['rollback_reason'] = (
+                "Network degraded after deployment"
+                if validation_dict['rollback_recommended']
+                else "Deployment validated successfully"
+            )
+
+        return validation_dict
+
+    def _fallback_validation(self, monitoring_diff: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Generate fallback validation when LLM response fails to parse."""
+        deployment_healthy = True
+        if monitoring_diff:
+            deployment_healthy = monitoring_diff.get('deployment_healthy', True)
+
+        return {
+            'validation_status': 'FAILED' if not deployment_healthy else 'PASSED',
+            'overall_score': 30 if not deployment_healthy else 90,
+            'rollback_recommended': not deployment_healthy,
+            'rollback_reason': 'Network degraded - automatic assessment due to LLM parsing failure' if not deployment_healthy else 'Deployment validated successfully',
+            'findings': [
+                {
+                    'category': 'System',
+                    'status': 'critical' if not deployment_healthy else 'ok',
+                    'severity': 'critical' if not deployment_healthy else 'info',
+                    'message': f"LLM response parsing failed. Automatic assessment: {'Network degraded' if not deployment_healthy else 'Network healthy'}"
+                }
+            ],
+            'summary': 'Automated validation due to LLM error',
+            'recommendation': 'Rollback recommended' if not deployment_healthy else 'Deployment validated'
+        }
 
     def _generate_demo_validation(
         self,

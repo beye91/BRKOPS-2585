@@ -174,6 +174,44 @@ export function Pipeline({ stages, currentStage, stagesData, onAdvance, isPaused
           );
         })()}
 
+        {/* Network Degraded Banner */}
+        {(() => {
+          const monitoring = stagesData.monitoring?.data;
+          const isNetworkDegraded =
+            stagesData.monitoring?.status === 'completed' &&
+            monitoring?.deployment_healthy === false;
+
+          if (!isNetworkDegraded) return null;
+
+          // Build message about what degraded
+          const degradedMetrics: string[] = [];
+          if (monitoring.diff) {
+            Object.entries(monitoring.diff).forEach(([metric, values]: [string, any]) => {
+              if (values.change < 0) {
+                degradedMetrics.push(
+                  `${metric.replace(/_/g, ' ')}: ${values.before} → ${values.after} (${values.change})`
+                );
+              }
+            });
+          }
+
+          const message = degradedMetrics.length > 0
+            ? `Network state degraded: ${degradedMetrics.join(', ')}`
+            : 'Network state degraded after deployment';
+
+          return (
+            <div className="mb-4">
+              <AlertBanner
+                severity="critical"
+                title="🔴 NETWORK DEGRADED"
+                message={message}
+                onAction={handleRollbackClick}
+                actionLabel={isRollingBack ? 'Rolling back...' : 'Execute Rollback'}
+              />
+            </div>
+          );
+        })()}
+
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold">Pipeline Progress</h2>
