@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
+from services.config_service import ConfigService
 
 logger = structlog.get_logger()
 
@@ -18,14 +20,51 @@ class NotificationService:
     Notification service for WebEx and ServiceNow integrations.
     """
 
-    def __init__(self):
+    def __init__(self, db: Optional[AsyncSession] = None):
         """Initialize notification service."""
+        self.db = db
         self.webex_webhook_url = settings.webex_webhook_url
         self.webex_bot_token = settings.webex_bot_token
         self.webex_room_id = settings.webex_room_id
-        self.servicenow_instance = settings.servicenow_instance
-        self.servicenow_username = settings.servicenow_username
-        self.servicenow_password = settings.servicenow_password
+        # ServiceNow credentials will be loaded from DB when needed
+        self.servicenow_instance = None
+        self.servicenow_username = None
+        self.servicenow_password = None
+        self._credentials_loaded = False
+
+    async def _load_servicenow_credentials(self):
+        """Load ServiceNow credentials from database, falling back to env vars."""
+        if self._credentials_loaded:
+            return
+
+        if self.db:
+            # Try to load from database first
+            self.servicenow_instance = await ConfigService.get_config(
+                self.db, "servicenow_instance", settings.servicenow_instance
+            )
+            self.servicenow_username = await ConfigService.get_config(
+                self.db, "servicenow_username", settings.servicenow_username
+            )
+            self.servicenow_password = await ConfigService.get_config(
+                self.db, "servicenow_password", settings.servicenow_password
+            )
+            logger.info(
+                "ServiceNow credentials loaded from database",
+                instance=self.servicenow_instance,
+                username_configured=bool(self.servicenow_username),
+            )
+        else:
+            # Fall back to environment variables
+            self.servicenow_instance = settings.servicenow_instance
+            self.servicenow_username = settings.servicenow_username
+            self.servicenow_password = settings.servicenow_password
+            logger.info(
+                "ServiceNow credentials loaded from environment",
+                instance=self.servicenow_instance,
+                username_configured=bool(self.servicenow_username),
+            )
+
+        self._credentials_loaded = True
 
     # ==========================================================================
     # WebEx
@@ -211,6 +250,9 @@ class NotificationService:
         Returns:
             Result dictionary with success status and ticket info
         """
+        # Load credentials from database if not already loaded
+        await self._load_servicenow_credentials()
+
         if not all([self.servicenow_instance, self.servicenow_username, self.servicenow_password]):
             return {"success": False, "error": "ServiceNow credentials not configured"}
 
@@ -285,6 +327,9 @@ class NotificationService:
 
     async def test_servicenow(self) -> Dict[str, Any]:
         """Test ServiceNow connection."""
+        # Load credentials from database if not already loaded
+        await self._load_servicenow_credentials()
+
         if not all([self.servicenow_instance, self.servicenow_username, self.servicenow_password]):
             return {"success": False, "error": "ServiceNow credentials not configured"}
 

@@ -1600,7 +1600,7 @@ async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, 
     """Send notifications based on validation results."""
     logger.info("Sending notifications", job_id=str(job.id))
 
-    notification_service = NotificationService()
+    notification_service = NotificationService(db=db)
 
     # Get validation results (renamed from ai_analysis)
     validation = job.stages_data.get("ai_validation", {}).get("data", {})

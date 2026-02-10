@@ -117,7 +117,7 @@ async def send_webex_message(
     """
     logger.info("Sending WebEx message")
 
-    notification_service = NotificationService()
+    notification_service = NotificationService(db=db)
 
     try:
         # Create notification record
@@ -190,7 +190,7 @@ async def create_servicenow_ticket(
     """
     logger.info("Creating ServiceNow ticket", short_description=ticket.short_description)
 
-    notification_service = NotificationService()
+    notification_service = NotificationService(db=db)
 
     try:
         # Create notification record
@@ -260,9 +260,11 @@ async def create_servicenow_ticket(
 
 
 @router.post("/test/webex")
-async def test_webex_connection():
+async def test_webex_connection(
+    db: AsyncSession = Depends(get_db),
+):
     """Test WebEx webhook connection."""
-    notification_service = NotificationService()
+    notification_service = NotificationService(db=db)
 
     try:
         result = await notification_service.test_webex()
@@ -272,9 +274,11 @@ async def test_webex_connection():
 
 
 @router.post("/test/servicenow")
-async def test_servicenow_connection():
+async def test_servicenow_connection(
+    db: AsyncSession = Depends(get_db),
+):
     """Test ServiceNow API connection."""
-    notification_service = NotificationService()
+    notification_service = NotificationService(db=db)
 
     try:
         result = await notification_service.test_servicenow()
