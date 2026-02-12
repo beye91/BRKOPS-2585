@@ -99,7 +99,9 @@ def match_input_to_use_case(input_text: str, use_cases: List[UseCase]) -> List[U
 def validate_use_case_selection(
     input_text: str,
     selected_use_case: UseCase,
-    all_use_cases: List[UseCase]
+    all_use_cases: List[UseCase],
+    mismatch_threshold: int = 30,
+    confidence_delta_threshold: int = 20,
 ) -> Dict:
     """
     Validate if the selected use case matches the input text.
@@ -148,16 +150,13 @@ def validate_use_case_selection(
         }
 
     # Mismatch detected - but only flag if confidence difference is significant
-    MISMATCH_THRESHOLD = 30  # Minimum confidence for the best match to trigger warning
-    CONFIDENCE_DELTA_THRESHOLD = 20  # How much better best match must be
-
     selected_confidence = selected_match.confidence if selected_match else 0
 
     # Only flag mismatch if:
-    # 1. Best match has decent confidence (>30%)
-    # 2. Best match is significantly better than selected (>20% delta)
-    if (best_match.confidence > MISMATCH_THRESHOLD and
-        best_match.confidence - selected_confidence > CONFIDENCE_DELTA_THRESHOLD):
+    # 1. Best match has decent confidence (above mismatch_threshold)
+    # 2. Best match is significantly better than selected (above confidence_delta_threshold)
+    if (best_match.confidence > mismatch_threshold and
+        best_match.confidence - selected_confidence > confidence_delta_threshold):
 
         return {
             "is_valid": False,

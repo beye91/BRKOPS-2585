@@ -183,6 +183,7 @@ async def collect_network_state(
     client: CMLClient,
     lab_id: str,
     device_label: str,
+    network_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Collect current network state from a device (OSPF neighbors, interfaces, routes).
@@ -191,10 +192,16 @@ async def collect_network_state(
         client: CML client instance
         lab_id: Lab UUID
         device_label: Device label/name
+        network_config: Optional dict with configurable patterns and CLI commands
 
     Returns:
         Dictionary with ospf_neighbors, interfaces, routes, and errors
     """
+    ospf_patterns = (network_config or {}).get('ospf_state_patterns', ['FULL', 'TWO-WAY', '2WAY'])
+    interface_patterns = (network_config or {}).get('interface_patterns', ['GigabitEthernet', 'Loopback'])
+    cpu_cmd = (network_config or {}).get('cpu_cli_command', 'show processes cpu | include CPU utilization')
+    memory_cmd = (network_config or {}).get('memory_cli_command', 'show processes memory | include Processor')
+
     state = {
         "ospf_neighbors": [],
         "interfaces": [],
@@ -208,7 +215,7 @@ async def collect_network_state(
         ospf_output = await client.run_command(lab_id, device_label, "show ip ospf neighbor")
         neighbors = []
         for line in ospf_output.split('\n'):
-            if 'FULL' in line or 'TWO-WAY' in line or '2WAY' in line:
+            if any(pattern in line for pattern in ospf_patterns):
                 parts = line.split()
                 if len(parts) >= 6:
                     neighbors.append({
@@ -225,7 +232,7 @@ async def collect_network_state(
         intf_output = await client.run_command(lab_id, device_label, "show ip interface brief")
         interfaces = []
         for line in intf_output.split('\n'):
-            if 'GigabitEthernet' in line or 'Loopback' in line:
+            if any(pattern in line for pattern in interface_patterns):
                 parts = line.split()
                 if len(parts) >= 5:
                     interfaces.append({
@@ -253,7 +260,7 @@ async def collect_network_state(
     try:
         import re as _re
         cpu_output = await client.run_command(
-            lab_id, device_label, "show processes cpu | include CPU utilization"
+            lab_id, device_label, cpu_cmd
         )
         cpu_match = _re.search(r'five seconds:\s*(\d+)%', cpu_output)
         state["cpu_utilization_percent"] = int(cpu_match.group(1)) if cpu_match else None
@@ -264,7 +271,7 @@ async def collect_network_state(
     try:
         import re as _re
         mem_output = await client.run_command(
-            lab_id, device_label, "show processes memory | include Processor"
+            lab_id, device_label, memory_cmd
         )
         mem_match = _re.search(r'Total:\s*(\d+)\s*Used:\s*(\d+)', mem_output)
         if mem_match:
@@ -409,7 +416,9 @@ async def continue_pipeline_after_approval(ctx: dict, job_id: str, demo_mode: bo
                         "message": "Waiting for manual advancement",
                     })
 
-                    await asyncio.sleep(1)
+                    from services.config_service import ConfigService
+                    demo_pause = await ConfigService.get_config(db, "pipeline.demo_stage_pause_seconds", 1)
+                    await asyncio.sleep(demo_pause)
                     job.status = JobStatus.RUNNING
                     await db.commit()
 
@@ -616,8 +625,10 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
                     })
 
                     # Wait for resume (in production, this would be handled differently)
-                    # For now, we continue after a short delay
-                    await asyncio.sleep(1)
+                    # For now, we continue after a configurable delay
+                    from services.config_service import ConfigService
+                    demo_pause = await ConfigService.get_config(db, "pipeline.demo_stage_pause_seconds", 1)
+                    await asyncio.sleep(demo_pause)
                     job.status = JobStatus.RUNNING
                     await db.commit()
 
@@ -1223,7 +1234,9 @@ async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db,
         client = CMLClient(cml_server.endpoint, cml_server.auth_config)
 
         # Wait for convergence (split into intervals for progress updates)
-        interval = min(5, wait_seconds)
+        from services.config_service import ConfigService
+        monitoring_interval_max = await ConfigService.get_config(db, "pipeline.monitoring_interval_max", 5)
+        interval = min(monitoring_interval_max, wait_seconds)
         elapsed = 0
         while elapsed < wait_seconds:
             await asyncio.sleep(interval)

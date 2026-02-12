@@ -36,8 +36,32 @@ class LLMService:
         self.anthropic_api_key = anthropic_api_key  # Override from database
         self.openai_client = None
         self.anthropic_client = None
+
+        # Configurable validation/scoring defaults
+        self.api_key_min_length = 20
+        self.demo_intent_confidence = 85
+        self.score_failed = 45
+        self.score_warning = 75
+        self.score_success = 95
+        self.route_loss_threshold = -2
+        self.fallback_score_unhealthy = 30
+        self.fallback_score_healthy = 90
+        self.missing_field_default_score = 50
+
         if not demo_mode:
             self._init_clients()
+
+    def load_validation_config(self, config: dict):
+        """Load validation scoring config from database values."""
+        self.score_failed = config.get('score_failed', 45)
+        self.score_warning = config.get('score_warning', 75)
+        self.score_success = config.get('score_success', 95)
+        self.fallback_score_unhealthy = config.get('fallback_score_unhealthy', 30)
+        self.fallback_score_healthy = config.get('fallback_score_healthy', 90)
+        self.route_loss_threshold = config.get('route_loss_threshold', -2)
+        self.missing_field_default_score = config.get('missing_field_default_score', 50)
+        self.api_key_min_length = config.get('api_key_min_length', 20)
+        self.demo_intent_confidence = config.get('demo_intent_confidence', 85)
 
     def _init_clients(self):
         """Initialize LLM clients based on available API keys."""
@@ -49,12 +73,12 @@ class LLMService:
         openai_key_valid = (
             openai_key and
             not openai_key.startswith("sk-your-") and
-            len(openai_key) > 20
+            len(openai_key) > self.api_key_min_length
         )
         anthropic_key_valid = (
             anthropic_key and
             not anthropic_key.startswith("sk-ant-your-") and
-            len(anthropic_key) > 20
+            len(anthropic_key) > self.api_key_min_length
         )
 
         if openai_key_valid:
@@ -332,7 +356,7 @@ class LLMService:
             "action": action,
             "target_devices": target_devices,
             "parameters": params,
-            "confidence": 85,
+            "confidence": self.demo_intent_confidence,
             "reasoning": f"Intent for {display_name} on {target_desc}",
         }
 
@@ -692,7 +716,7 @@ Return ONLY the JSON object, no additional text."""
                 if expected_type == str:
                     validation_dict[field] = f"Missing {field}"
                 elif expected_type in (int, float) or expected_type == (int, float):
-                    validation_dict[field] = 50  # Middle score
+                    validation_dict[field] = self.missing_field_default_score
                 elif expected_type == bool:
                     validation_dict[field] = False
                 elif expected_type == list:
@@ -704,7 +728,7 @@ Return ONLY the JSON object, no additional text."""
                     try:
                         validation_dict[field] = int(validation_dict[field])
                     except (ValueError, TypeError):
-                        validation_dict[field] = 50
+                        validation_dict[field] = self.missing_field_default_score
                 elif field == 'rollback_recommended':
                     validation_dict[field] = bool(validation_dict[field])
                 elif field == 'findings' and not isinstance(validation_dict[field], list):
@@ -762,7 +786,7 @@ Return ONLY the JSON object, no additional text."""
 
         return {
             'validation_status': 'FAILED' if not deployment_healthy else 'PASSED',
-            'overall_score': 30 if not deployment_healthy else 90,
+            'overall_score': self.fallback_score_unhealthy if not deployment_healthy else self.fallback_score_healthy,
             'rollback_recommended': not deployment_healthy,
             'rollback_reason': 'Network degraded - automatic assessment due to LLM parsing failure' if not deployment_healthy else 'Deployment validated successfully',
             'findings': [
@@ -807,7 +831,7 @@ Return ONLY the JSON object, no additional text."""
                     f"OSPF neighbors {ospf_change:+d}, interfaces {interface_change:+d}. "
                     f"This indicates loss of connectivity or routing instability."
                 )
-            elif route_change < -2:  # Lost more than 2 routes
+            elif route_change < self.route_loss_threshold:  # Lost more than threshold routes
                 rollback_recommended = True
                 validation_status = "FAILED"
                 rollback_reason = f"Significant route loss detected: {route_change:+d} routes. This may indicate routing instability."
@@ -857,7 +881,7 @@ Return ONLY the JSON object, no additional text."""
                     "category": "OSPF Routes",
                     "status": "error" if rollback_recommended else "warning",
                     "message": f"Routes lost ({route_change:+d})",
-                    "severity": "critical" if route_change < -2 else "warning"
+                    "severity": "critical" if route_change < self.route_loss_threshold else "warning"
                 })
 
         base_findings = []
@@ -873,11 +897,11 @@ Return ONLY the JSON object, no additional text."""
 
         # Determine overall score based on validation status
         if validation_status == "FAILED":
-            overall_score = 45
+            overall_score = self.score_failed
         elif validation_status == "WARNING":
-            overall_score = 75
+            overall_score = self.score_warning
         else:
-            overall_score = 95
+            overall_score = self.score_success
 
         # Build recommendation message
         if rollback_recommended:

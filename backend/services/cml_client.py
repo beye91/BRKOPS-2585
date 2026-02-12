@@ -872,7 +872,7 @@ router ospf 1
  network 10.255.255.4 0.0.0.0 area 0
 end"""
 
-    async def reset_lab_configs(self, lab_id: str) -> Dict[str, Any]:
+    async def reset_lab_configs(self, lab_id: str, max_retries: int = 5, retry_delay: int = 30) -> Dict[str, Any]:
         """
         Reset all router configurations to baseline demo state with retry logic.
 
@@ -883,6 +883,8 @@ end"""
 
         Args:
             lab_id: Lab UUID
+            max_retries: Maximum number of retry attempts per router
+            retry_delay: Delay in seconds between retries
 
         Returns:
             Dictionary with reset results per router
@@ -895,8 +897,6 @@ end"""
         }
 
         results = {}
-        max_retries = 5  # Increased retries for booting routers
-        retry_delay = 30  # Increased delay - routers may still be booting
 
         for label, config in baseline_configs.items():
             success = False

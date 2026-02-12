@@ -20,9 +20,10 @@ class VoiceService:
     Voice transcription service using OpenAI Whisper API.
     """
 
-    def __init__(self):
+    def __init__(self, http_timeout: int = 60):
         """Initialize voice service."""
         self.api_key = settings.openai_api_key
+        self.http_timeout = http_timeout
         if not self.api_key:
             logger.warning("OpenAI API key not configured for voice service")
 
@@ -75,7 +76,7 @@ class VoiceService:
         data["prompt"] = network_prompt + (f" {prompt}" if prompt else "")
 
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                 response = await client.post(
                     "https://api.openai.com/v1/audio/transcriptions",
                     headers={

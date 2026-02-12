@@ -14,16 +14,23 @@ interface WebSocketState {
   socket: WebSocket | null;
   connected: boolean;
   messages: WebSocketMessage[];
+  reconnectDelay: number;
   connect: (url: string) => void;
   disconnect: () => void;
   subscribe: (jobId: string) => void;
   clearMessages: () => void;
+  setReconnectDelay: (delay: number) => void;
 }
 
 export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   socket: null,
   connected: false,
   messages: [],
+  reconnectDelay: 3000,
+
+  setReconnectDelay: (delay: number) => {
+    set({ reconnectDelay: delay });
+  },
 
   connect: (url: string) => {
     const { socket } = get();
@@ -42,10 +49,11 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
       console.log('WebSocket disconnected');
       set({ connected: false, socket: null });
 
-      // Reconnect after 3 seconds
+      // Reconnect after configurable delay
+      const { reconnectDelay } = get();
       setTimeout(() => {
         get().connect(url);
-      }, 3000);
+      }, reconnectDelay);
     };
 
     ws.onerror = (error) => {

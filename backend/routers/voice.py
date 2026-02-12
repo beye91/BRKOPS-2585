@@ -44,12 +44,15 @@ async def transcribe_audio(
             detail=f"Unsupported file type: {file.content_type}. Supported: mp3, mp4, wav, webm, m4a",
         )
 
-    # Check file size (25MB limit)
+    # Check file size
     content = await file.read()
-    if len(content) > 25 * 1024 * 1024:
+    from services.config_service import ConfigService
+    audio_max_mb = await ConfigService.get_config(db, "operational.audio_max_size_mb", 25)
+    audio_max_bytes = int(audio_max_mb) * 1024 * 1024
+    if len(content) > audio_max_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="File size exceeds 25MB limit",
+            detail=f"File size exceeds {audio_max_mb}MB limit",
         )
 
     logger.info(

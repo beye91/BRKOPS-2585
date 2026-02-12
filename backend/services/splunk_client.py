@@ -43,16 +43,20 @@ class SplunkClient:
     Provides access to SPL query execution and natural language to SPL conversion.
     """
 
-    def __init__(self, endpoint: str, auth_config: Dict[str, Any]):
+    def __init__(self, endpoint: str, auth_config: Dict[str, Any], query_config: Optional[Dict[str, str]] = None, operational_config: Optional[Dict[str, Any]] = None):
         """
         Initialize Splunk MCP client.
 
         Args:
             endpoint: MCP server endpoint URL
             auth_config: Authentication configuration with host, token
+            query_config: Optional dictionary of named SPL query templates
+            operational_config: Optional dictionary of operational settings (limits, indexes, etc.)
         """
         self.endpoint = endpoint.rstrip("/")
         self.auth_config = auth_config
+        self.query_config = query_config or {}
+        self.operational_config = operational_config or {}
         self.timeout = settings.pipeline_mcp_timeout
 
         # Build the MCP endpoint URL
@@ -380,7 +384,7 @@ class SplunkClient:
     async def generate_spl(
         self,
         description: str,
-        index: str = "netops",
+        index: str = None,
         additional_context: Optional[str] = None,
     ) -> str:
         """
@@ -388,12 +392,13 @@ class SplunkClient:
 
         Args:
             description: Natural language description of what to search for
-            index: Default index to use
+            index: Default index to use (falls back to operational_config or 'netops')
             additional_context: Additional context for the query
 
         Returns:
             Generated SPL query string
         """
+        index = index or self.operational_config.get('default_index', 'netops')
         try:
             params = {
                 "description": description,
@@ -444,9 +449,11 @@ class SplunkClient:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for OSPF-related events."""
-        spl = 'index=netops (OSPF OR "routing" OR "adjacency")'
+        base_spl = self.query_config.get('query_ospf_events', 'index=netops (OSPF OR "routing" OR "adjacency")')
+        result_limit = self.operational_config.get('query_result_limit', 100)
+        spl = base_spl
         spl = self._add_host_filter(spl, device)
-        spl += ' | sort -_time | head 100'
+        spl += f' | sort -_time | head {result_limit}'
 
         return await self.run_query(spl, earliest=earliest)
 
@@ -456,9 +463,11 @@ class SplunkClient:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for routing errors and warnings."""
-        spl = 'index=netops (error OR warning OR critical) (routing OR OSPF OR BGP OR EIGRP)'
+        base_spl = self.query_config.get('query_routing_errors', 'index=netops (error OR warning OR critical) (routing OR OSPF OR BGP OR EIGRP)')
+        result_limit = self.operational_config.get('query_result_limit', 100)
+        spl = base_spl
         spl = self._add_host_filter(spl, device)
-        spl += ' | sort -_time | head 100'
+        spl += f' | sort -_time | head {result_limit}'
 
         return await self.run_query(spl, earliest=earliest)
 
@@ -468,9 +477,11 @@ class SplunkClient:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for configuration change events."""
-        spl = 'index=netops ("config" OR "configuration") ("change" OR "modified" OR "updated")'
+        base_spl = self.query_config.get('query_config_changes', 'index=netops ("config" OR "configuration") ("change" OR "modified" OR "updated")')
+        result_limit = self.operational_config.get('query_result_limit', 100)
+        spl = base_spl
         spl = self._add_host_filter(spl, device)
-        spl += ' | sort -_time | head 100'
+        spl += f' | sort -_time | head {result_limit}'
 
         return await self.run_query(spl, earliest=earliest)
 
@@ -480,9 +491,11 @@ class SplunkClient:
         device: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for authentication-related events."""
-        spl = 'index=netops (authentication OR login OR "access" OR "denied" OR "failed")'
+        base_spl = self.query_config.get('query_auth_events', 'index=netops (authentication OR login OR "access" OR "denied" OR "failed")')
+        result_limit = self.operational_config.get('query_result_limit', 100)
+        spl = base_spl
         spl = self._add_host_filter(spl, device)
-        spl += ' | sort -_time | head 100'
+        spl += f' | sort -_time | head {result_limit}'
 
         return await self.run_query(spl, earliest=earliest)
 
@@ -513,7 +526,8 @@ class SplunkClient:
             return []
         except Exception as e:
             logger.error("Failed to get indexes", error=str(e))
-            return ["network", "main", "security"]
+            fallback = self.operational_config.get('fallback_indexes', ["network", "main", "security"])
+            return fallback if isinstance(fallback, list) else ["network", "main", "security"]
 
     async def get_saved_searches(self) -> List[Dict[str, Any]]:
         """Get list of saved searches."""

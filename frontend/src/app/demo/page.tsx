@@ -33,6 +33,7 @@ import { ApprovalPanel } from '@/components/ApprovalPanel';
 import { OperationHistoryPanel } from '@/components/OperationHistoryPanel';
 import { OperationDetailModal } from '@/components/OperationDetailModal';
 import { cn, PIPELINE_STAGES } from '@/lib/utils';
+import { useConfigValue } from '@/lib/configProvider';
 
 interface ProtocolMismatch {
   message: string;
@@ -55,6 +56,9 @@ export default function DemoPage() {
 
   const { currentOperation, setCurrentOperation, updateStage, setLoading, setError, isLoading } = useOperationsStore();
   const { messages, connected, subscribe } = useWebSocketStore();
+
+  // Dynamic config: polling interval (default 3000ms)
+  const pollingInterval = useConfigValue('ui.polling_interval_ms', 3000);
 
   // Determine which operation to display (live or history)
   const displayOperation = viewingHistoryOp || currentOperation;
@@ -140,10 +144,10 @@ export default function DemoPage() {
       } catch (err) {
         console.error('Poll refresh failed:', err);
       }
-    }, 3000);
+    }, pollingInterval);
 
     return () => clearInterval(interval);
-  }, [currentOperation?.id, currentOperation?.status, setCurrentOperation]);
+  }, [currentOperation?.id, currentOperation?.status, setCurrentOperation, pollingInterval]);
 
   const handleStartOperation = async (forceMode = false) => {
     if (!transcript.trim()) return;

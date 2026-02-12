@@ -168,10 +168,12 @@ async def retry_job(
                 password=settings.redis_password or None,
             )
         )
+        from services.config_service import ConfigService
+        demo_mode = await ConfigService.get_config(db, "pipeline.demo_mode", True)
         await redis_pool.enqueue_job(
             "process_pipeline_job",
             job_id,
-            True,  # demo_mode
+            demo_mode,
         )
         await redis_pool.close()
 
@@ -192,10 +194,14 @@ async def retry_job(
 
 @router.delete("/completed")
 async def clear_completed_jobs(
-    older_than_hours: int = 24,
+    older_than_hours: int = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Clear completed jobs older than specified hours."""
+    if older_than_hours is None:
+        from services.config_service import ConfigService
+        older_than_hours = await ConfigService.get_config(db, "operational.job_cleanup_retention_hours", 24)
+        older_than_hours = int(older_than_hours)
     cutoff = datetime.utcnow() - timedelta(hours=older_than_hours)
 
     result = await db.execute(

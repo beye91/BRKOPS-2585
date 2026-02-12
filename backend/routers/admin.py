@@ -66,6 +66,26 @@ async def get_all_config(
     ]
 
 
+@router.get("/config/runtime")
+async def get_runtime_config(
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all non-secret config values as flat dict for frontend runtime config."""
+    result = await db.execute(
+        select(ConfigVariable).where(ConfigVariable.is_secret == False).order_by(ConfigVariable.key)
+    )
+    variables = result.scalars().all()
+
+    config = {}
+    for var in variables:
+        value = var.value
+        if isinstance(value, str) and value.startswith('"') and value.endswith('"'):
+            value = value[1:-1]
+        config[var.key] = value
+
+    return config
+
+
 @router.get("/config/{key}", response_model=ConfigVariableResponse)
 async def get_config_variable(
     key: str,
@@ -428,7 +448,9 @@ async def login(
     # Generate JWT
     from config import settings
 
-    expires = datetime.utcnow() + timedelta(hours=24)
+    from services.config_service import ConfigService
+    jwt_expiry = await ConfigService.get_config(db, "operational.jwt_expiry_seconds", 86400)
+    expires = datetime.utcnow() + timedelta(seconds=int(jwt_expiry))
     token_data = {
         "sub": user.username,
         "role": user.role.value,
@@ -441,5 +463,5 @@ async def login(
     return TokenResponse(
         access_token=token,
         token_type="bearer",
-        expires_in=86400,  # 24 hours
+        expires_in=int(jwt_expiry),
     )

@@ -20,9 +20,10 @@ class NotificationService:
     Notification service for WebEx and ServiceNow integrations.
     """
 
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self, db: Optional[AsyncSession] = None, http_timeout: int = 30):
         """Initialize notification service."""
         self.db = db
+        self.http_timeout = http_timeout
         self.webex_webhook_url = settings.webex_webhook_url
         self.webex_bot_token = settings.webex_bot_token
         self.webex_room_id = settings.webex_room_id
@@ -105,7 +106,7 @@ class NotificationService:
     async def _send_webex_webhook(self, message: str) -> Dict[str, Any]:
         """Send message via WebEx incoming webhook."""
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                 response = await client.post(
                     self.webex_webhook_url,
                     json={"markdown": message},
@@ -150,7 +151,7 @@ class NotificationService:
             if attachments:
                 payload["attachments"] = attachments
 
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                 response = await client.post(
                     "https://webexapis.com/v1/messages",
                     headers={
@@ -228,6 +229,8 @@ class NotificationService:
         category: str = "Network",
         subcategory: Optional[str] = None,
         priority: str = "3",
+        impact: str = "2",
+        urgency: str = "2",
         assignment_group: Optional[str] = None,
         caller_id: Optional[str] = None,
         cmdb_ci: Optional[str] = None,
@@ -242,6 +245,8 @@ class NotificationService:
             category: Incident category
             subcategory: Incident subcategory
             priority: Priority level (1-5)
+            impact: Impact level (1-3, default "2" Medium)
+            urgency: Urgency level (1-3, default "2" Medium)
             assignment_group: Assignment group name
             caller_id: Caller user ID
             cmdb_ci: Configuration item
@@ -263,8 +268,8 @@ class NotificationService:
                 "description": description,
                 "category": category,
                 "priority": priority,
-                "impact": "2",  # Medium
-                "urgency": "2",  # Medium
+                "impact": impact,
+                "urgency": urgency,
             }
 
             if subcategory:
@@ -281,7 +286,7 @@ class NotificationService:
             # ServiceNow REST API URL
             url = f"https://{self.servicenow_instance}/api/now/table/incident"
 
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                 response = await client.post(
                     url,
                     auth=(self.servicenow_username, self.servicenow_password),

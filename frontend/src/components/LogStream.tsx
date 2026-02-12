@@ -16,13 +16,17 @@ interface LogEntry {
   [key: string]: any;
 }
 
+// Default OSPF error pattern
+const DEFAULT_ERROR_PATTERN = /(%OSPF-[45]-\w+|ERROR|FAILED|DOWN)/gi;
+
 interface LogStreamProps {
   logs: LogEntry[];
   operationStatus?: string;
   operationStage?: string;
+  errorPattern?: RegExp;
 }
 
-export function LogStream({ logs, operationStatus, operationStage }: LogStreamProps) {
+export function LogStream({ logs, operationStatus, operationStage, errorPattern }: LogStreamProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState('');
   const [levelFilter, setLevelFilter] = useState<string>('all');
@@ -80,15 +84,18 @@ export function LogStream({ logs, operationStatus, operationStage }: LogStreamPr
   };
 
   const formatLogMessage = (message: string): React.ReactNode => {
-    // Highlight OSPF errors in red
-    const ospfKeywords = /(%OSPF-[45]-\w+|ERROR|FAILED|DOWN)/gi;
-    const parts = message.split(ospfKeywords);
+    // Highlight error keywords in red (configurable pattern)
+    const pattern = errorPattern || DEFAULT_ERROR_PATTERN;
+    // Reset lastIndex for global regex
+    pattern.lastIndex = 0;
+    const parts = message.split(pattern);
 
-    return parts.map((part, i) =>
-      ospfKeywords.test(part) ? (
+    return parts.map((part, i) => {
+      pattern.lastIndex = 0;
+      return pattern.test(part) ? (
         <span key={i} className="text-error font-semibold">{part}</span>
-      ) : part
-    );
+      ) : part;
+    });
   };
 
   return (

@@ -88,9 +88,9 @@ export function formatStageDuration(seconds: number | null): string {
   return `${mins}m ${secs}s`;
 }
 
-export function getDurationColor(seconds: number | null): string {
+export function getDurationColor(seconds: number | null, fastThreshold = 2, mediumThreshold = 10): string {
   if (seconds === null) return 'text-text-muted';
-  if (seconds < 2) return 'text-success';
-  if (seconds < 10) return 'text-warning';
+  if (seconds < fastThreshold) return 'text-success';
+  if (seconds < mediumThreshold) return 'text-warning';
   return 'text-error';
 }

@@ -19,6 +19,43 @@ class ConfigService:
     """Service for reading configuration from database."""
 
     @staticmethod
+    async def get_configs_by_category(db: AsyncSession, category: str) -> dict:
+        """
+        Get all config values for a category as a flat dict (strips category prefix).
+
+        Args:
+            db: Database session
+            category: Configuration category (e.g., 'validation', 'matching')
+
+        Returns:
+            Dictionary with stripped keys and parsed values
+        """
+        try:
+            result = await db.execute(
+                select(ConfigVariable).where(ConfigVariable.category == category)
+            )
+            config_vars = result.scalars().all()
+
+            config = {}
+            for var in config_vars:
+                key = var.key
+                if '.' in key:
+                    key = key.split('.', 1)[1]
+
+                value = var.value
+                if isinstance(value, str) and value.startswith('"') and value.endswith('"'):
+                    value = value[1:-1]
+
+                config[key] = value
+
+            logger.info("Config category loaded", category=category, keys=list(config.keys()))
+            return config
+
+        except Exception as e:
+            logger.warning("Failed to load config category", category=category, error=str(e))
+            return {}
+
+    @staticmethod
     async def get_config(db: AsyncSession, key: str, default: Any = None) -> Any:
         """
         Get a configuration value from the database.

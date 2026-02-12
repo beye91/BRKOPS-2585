@@ -18,8 +18,9 @@ logger = structlog.get_logger()
 class IntentMatcherService:
     """Fully dynamic LLM-based intent matching and parsing."""
 
-    def __init__(self, llm_service: LLMService):
+    def __init__(self, llm_service: LLMService, temperature: float = 0.3):
         self.llm = llm_service
+        self.temperature = temperature
 
     async def match_and_parse_intent(
         self,
@@ -73,7 +74,7 @@ class IntentMatcherService:
                 prompt=prompt,
                 system_prompt="You are an expert network automation intent classifier. Be strict - better to return no match than guess wrong.",
                 json_response=True,
-                temperature=0.3  # Lower temperature for deterministic matching
+                temperature=self.temperature
             )
 
             # Parse JSON response
@@ -154,7 +155,7 @@ class IntentMatcherService:
             prompt=formatted_prompt,
             system_prompt="You are a network automation intent parser. Extract structured data from voice commands.",
             json_response=True,
-            temperature=0.3
+            temperature=self.temperature
         )
 
         result = json.loads(response)

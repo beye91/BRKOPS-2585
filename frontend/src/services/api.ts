@@ -1,13 +1,23 @@
 import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = `${API_URL}/api/v1`;
 
 export const api = axios.create({
-  baseURL: `${API_URL}/api/v1`,
+  baseURL: API_BASE,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+// Runtime Config API (uses fetch, not axios, to avoid circular deps in providers)
+export const runtimeConfigApi = {
+  getRuntimeConfig: async (): Promise<Record<string, any>> => {
+    const response = await fetch(`${API_BASE}/admin/config/runtime`);
+    if (!response.ok) throw new Error('Failed to fetch runtime config');
+    return response.json();
+  },
+};
 
 // Operations API
 export const operationsApi = {

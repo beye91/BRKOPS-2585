@@ -39,7 +39,7 @@ ALL_KEYWORDS = {
 }
 
 
-def is_all_keyword(targets: List[str]) -> bool:
+def is_all_keyword(targets: List[str], all_keywords: Optional[set] = None) -> bool:
     """
     Check if target_devices list contains an "all" keyword.
 
@@ -53,12 +53,14 @@ def is_all_keyword(targets: List[str]) -> bool:
         return False
 
     target = targets[0].strip().lower()
-    return target in ALL_KEYWORDS
+    return target in (all_keywords or ALL_KEYWORDS)
 
 
 async def get_available_routers(
     client: CMLClient,
     lab_id: str,
+    router_definitions: Optional[set] = None,
+    active_states: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """
     Query CML for all active router nodes in a lab.
@@ -74,7 +76,7 @@ async def get_available_routers(
         label = node.get("label", "")
 
         # Filter to routers by node_definition AND active state
-        if node_def in ROUTER_NODE_DEFINITIONS and state in ACTIVE_NODE_STATES:
+        if node_def in (router_definitions or ROUTER_NODE_DEFINITIONS) and state in (active_states or ACTIVE_NODE_STATES):
             routers.append(node)
             logger.debug(
                 "Found active router",
@@ -99,6 +101,7 @@ async def resolve_target_devices(
     raw_targets: List[str],
     client: CMLClient,
     lab_id: str,
+    all_keywords: Optional[set] = None,
 ) -> Tuple[List[str], List[str]]:
     """
     Resolve raw target_devices from intent to actual CML node labels.
@@ -110,6 +113,7 @@ async def resolve_target_devices(
         raw_targets: Target device list from intent (e.g. ["all"], ["Router-1", "Router-3"])
         client: CML client instance
         lab_id: CML lab ID
+        all_keywords: Optional override for keywords meaning "all devices"
 
     Returns:
         (resolved_labels, errors) tuple.
@@ -123,7 +127,7 @@ async def resolve_target_devices(
     available_labels = [r.get("label", "") for r in available]
 
     # Case 1: "all" keyword -> return all available routers
-    if is_all_keyword(raw_targets):
+    if is_all_keyword(raw_targets, all_keywords=all_keywords):
         if not available_labels:
             return [], [
                 "No active routers found in CML lab. "

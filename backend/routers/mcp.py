@@ -485,8 +485,9 @@ async def get_demo_lab_status(
 ):
     """Check if the BRKOPS-2585 demo lab exists and get its status."""
     from db.models import MCPServerType
+    from services.config_service import ConfigService
 
-    DEMO_LAB_TITLE = "BRKOPS-2585-OSPF-Demo"
+    DEMO_LAB_TITLE = await ConfigService.get_config(db, "devices.demo_lab_title", "BRKOPS-2585-OSPF-Demo")
 
     result = await db.execute(
         select(MCPServer).where(
@@ -537,12 +538,12 @@ async def get_demo_lab_status(
         ]
 
         # Build management IP mapping
-        mgmt_ips = {
+        mgmt_ips = await ConfigService.get_config(db, "devices.management_ip_mapping", {
             "Router-1": "198.18.1.201",
             "Router-2": "198.18.1.202",
             "Router-3": "198.18.1.203",
             "Router-4": "198.18.1.204",
-        }
+        })
 
         return CMLDemoLabStatus(
             exists=True,
@@ -642,12 +643,15 @@ async def build_demo_lab(
         yaml_content = f.read()
 
     try:
+        from services.config_service import ConfigService
+
+        demo_title = await ConfigService.get_config(db, "devices.demo_lab_title", "BRKOPS-2585-OSPF-Demo")
         client = CMLClient(server.endpoint, server.auth_config)
 
         # Check if lab already exists (API returns lab_title)
         labs = await client.get_labs()
         for lab in labs:
-            if lab.get("lab_title") == "BRKOPS-2585-OSPF-Demo":
+            if lab.get("lab_title") == demo_title:
                 return LabActionResponse(
                     success=True,
                     lab_id=lab.get("id"),

@@ -26,13 +26,19 @@ import {
   EyeOff,
   AlertCircle,
   Network,
+  Shield,
+  Target,
+  HardDrive,
+  Wifi,
+  Search,
+  Clock,
 } from 'lucide-react';
 import Link from 'next/link';
 import { adminApi, mcpApi, notificationsApi } from '@/services/api';
 import { cn } from '@/lib/utils';
 import CMLLabPanel from '@/components/admin/CMLLabPanel';
 
-type TabId = 'mcp' | 'cml-labs' | 'llm' | 'use-cases' | 'notifications' | 'pipeline' | 'users';
+type TabId = 'mcp' | 'cml-labs' | 'llm' | 'use-cases' | 'notifications' | 'pipeline' | 'users' | 'validation' | 'matching' | 'devices' | 'network' | 'splunk' | 'operational' | 'ui';
 
 // Toast notification component
 function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) {
@@ -80,6 +86,13 @@ export default function AdminPage() {
     { id: 'use-cases', label: 'Use Cases', icon: FileText },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'pipeline', label: 'Pipeline', icon: Settings },
+    { id: 'validation', label: 'Validation', icon: Shield },
+    { id: 'matching', label: 'Matching', icon: Target },
+    { id: 'devices', label: 'Devices', icon: HardDrive },
+    { id: 'network', label: 'Network', icon: Wifi },
+    { id: 'splunk', label: 'Splunk', icon: Search },
+    { id: 'operational', label: 'Operational', icon: Clock },
+    { id: 'ui', label: 'UI Config', icon: Eye },
     { id: 'users', label: 'Users', icon: Users },
   ];
 
@@ -132,6 +145,13 @@ export default function AdminPage() {
               {activeTab === 'use-cases' && <UseCasesTab key="use-cases" showToast={showToast} />}
               {activeTab === 'notifications' && <NotificationsTab key="notifications" showToast={showToast} />}
               {activeTab === 'pipeline' && <PipelineTab key="pipeline" showToast={showToast} />}
+              {activeTab === 'validation' && <DynamicConfigTab key="validation" category="validation" title="Validation Scoring" description="Scoring thresholds, rollback criteria, and API key validation" showToast={showToast} />}
+              {activeTab === 'matching' && <DynamicConfigTab key="matching" category="matching" title="Intent Matching" description="Intent matching thresholds and LLM temperature" showToast={showToast} />}
+              {activeTab === 'devices' && <DynamicConfigTab key="devices" category="devices" title="Device Configuration" description="Router definitions, lab config, and IP mappings" showToast={showToast} />}
+              {activeTab === 'network' && <DynamicConfigTab key="network" category="network" title="Network Patterns" description="OSPF patterns, interface patterns, and CLI commands" showToast={showToast} />}
+              {activeTab === 'splunk' && <DynamicConfigTab key="splunk" category="splunk" title="Splunk Configuration" description="SPL query templates, indexes, and result limits" showToast={showToast} />}
+              {activeTab === 'operational' && <DynamicConfigTab key="operational" category="operational" title="Operational Settings" description="Timeouts, retries, ServiceNow defaults, and job cleanup" showToast={showToast} />}
+              {activeTab === 'ui' && <DynamicConfigTab key="ui" category="ui" title="UI Configuration" description="Polling intervals, WebSocket reconnect, duration thresholds, and pipeline stages" showToast={showToast} />}
               {activeTab === 'users' && <UsersTab key="users" showToast={showToast} />}
             </AnimatePresence>
           </div>
@@ -1844,6 +1864,172 @@ function PipelineTab({ showToast }: { showToast: (msg: string, type: 'success' |
               Auto-advance through stages without pausing
             </label>
           </div>
+
+          <button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending || !hasChanges}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50"
+          >
+            {saveMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
+            Save Changes
+          </button>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// Dynamic Config Tab - Generic editor for any config category
+function DynamicConfigTab({
+  category,
+  title,
+  description,
+  showToast,
+}: {
+  category: string;
+  title: string;
+  description: string;
+  showToast: (msg: string, type: 'success' | 'error') => void;
+}) {
+  const queryClient = useQueryClient();
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [hasChanges, setHasChanges] = useState(false);
+
+  const { data: config, isLoading } = useQuery({
+    queryKey: ['config'],
+    queryFn: () => adminApi.getConfig().then((res) => res.data),
+  });
+
+  const variables = config?.find((c: any) => c.category === category)?.variables || [];
+
+  useEffect(() => {
+    if (variables.length > 0 && Object.keys(editValues).length === 0) {
+      const initial: Record<string, string> = {};
+      variables.forEach((v: any) => {
+        const value = v.value;
+        if (typeof value === 'object') {
+          initial[v.key] = JSON.stringify(value, null, 2);
+        } else {
+          initial[v.key] = String(value);
+        }
+      });
+      setEditValues(initial);
+    }
+  }, [variables]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const updates = Object.entries(editValues).map(([key, rawValue]) => {
+        let parsedValue: any = rawValue;
+        // Try parsing as JSON (for arrays/objects)
+        try {
+          const parsed = JSON.parse(rawValue);
+          if (typeof parsed === 'object') {
+            parsedValue = parsed;
+          } else {
+            parsedValue = parsed;
+          }
+        } catch {
+          // Try as number
+          if (!isNaN(Number(rawValue)) && rawValue.trim() !== '') {
+            parsedValue = Number(rawValue);
+          }
+        }
+        return { key, value: parsedValue };
+      });
+      await Promise.all(
+        updates.map((u) => adminApi.updateConfigVariable(u.key, { value: u.value }))
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config'] });
+      queryClient.invalidateQueries({ queryKey: ['runtime-config'] });
+      setHasChanges(false);
+      showToast(`${title} settings saved`, 'success');
+    },
+    onError: (error: any) => {
+      showToast(error.response?.data?.detail || 'Failed to save settings', 'error');
+    },
+  });
+
+  const handleChange = (key: string, value: string) => {
+    setEditValues({ ...editValues, [key]: value });
+    setHasChanges(true);
+  };
+
+  const isJsonValue = (value: string) => {
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === 'object' && parsed !== null;
+    } catch {
+      return false;
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="space-y-6"
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">{title}</h2>
+          <p className="text-sm text-text-muted mt-1">{description}</p>
+        </div>
+        {hasChanges && <span className="text-sm text-warning">Unsaved changes</span>}
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        </div>
+      ) : variables.length === 0 ? (
+        <div className="bg-background-elevated rounded-xl border border-border p-6 text-center text-text-muted">
+          No configuration variables found for category &quot;{category}&quot;.
+          Run the database migration to seed default values.
+        </div>
+      ) : (
+        <div className="bg-background-elevated rounded-xl border border-border p-6 space-y-5">
+          {variables.map((v: any) => {
+            const shortKey = v.key.includes('.') ? v.key.split('.').slice(1).join('.') : v.key;
+            const currentValue = editValues[v.key] ?? '';
+            const useTextarea = isJsonValue(currentValue) || currentValue.length > 80;
+
+            return (
+              <div key={v.key}>
+                <label className="block text-sm font-medium text-text-primary mb-1">
+                  {shortKey}
+                </label>
+                {v.description && (
+                  <p className="text-xs text-text-muted mb-2">{v.description}</p>
+                )}
+                {useTextarea ? (
+                  <textarea
+                    value={currentValue}
+                    onChange={(e) => handleChange(v.key, e.target.value)}
+                    rows={Math.min(8, currentValue.split('\n').length + 1)}
+                    className="w-full px-4 py-2 bg-background border border-border rounded-lg font-mono text-sm"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={currentValue}
+                    onChange={(e) => handleChange(v.key, e.target.value)}
+                    className="w-full px-4 py-2 bg-background border border-border rounded-lg"
+                  />
+                )}
+                {v.is_secret && (
+                  <p className="text-xs text-warning mt-1">Secret value</p>
+                )}
+              </div>
+            );
+          })}
 
           <button
             onClick={() => saveMutation.mutate()}
