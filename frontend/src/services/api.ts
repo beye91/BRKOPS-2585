@@ -21,7 +21,7 @@ export const runtimeConfigApi = {
 
 // Operations API
 export const operationsApi = {
-  start: (data: { text?: string; audio_url?: string; use_case?: string; lab_id?: string | null; demo_mode?: boolean; force?: boolean }) =>
+  start: (data: { text?: string; audio_url?: string; use_case?: string; lab_id?: string | null; force?: boolean }) =>
     api.post('/operations/start', data),
 
   get: (id: string) =>

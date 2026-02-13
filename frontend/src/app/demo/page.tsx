@@ -161,7 +161,6 @@ export default function DemoPage() {
         text: transcript,
         use_case: selectedUseCase,
         lab_id: selectedLab,
-        demo_mode: true,
         force: forceMode,
       });
 

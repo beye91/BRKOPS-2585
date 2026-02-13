@@ -18,18 +18,15 @@ class LLMService:
     """
     LLM service with primary (OpenAI GPT-4) and fallback (Claude) providers.
     Automatically falls back to secondary provider on failure.
-    Supports demo_mode for mock responses without real API calls.
     """
 
     def __init__(
         self,
-        demo_mode: bool = False,
         provider: str = None,
         model: str = None,
         openai_api_key: str = None,
         anthropic_api_key: str = None
     ):
-        self.demo_mode = demo_mode
         self.provider_override = provider  # 'openai' or 'anthropic' (None = use default)
         self.model_override = model  # specific model name (None = use default)
         self.openai_api_key = openai_api_key  # Override from database
@@ -39,7 +36,6 @@ class LLMService:
 
         # Configurable validation/scoring defaults
         self.api_key_min_length = 20
-        self.demo_intent_confidence = 85
         self.score_failed = 45
         self.score_warning = 75
         self.score_success = 95
@@ -48,8 +44,7 @@ class LLMService:
         self.fallback_score_healthy = 90
         self.missing_field_default_score = 50
 
-        if not demo_mode:
-            self._init_clients()
+        self._init_clients()
 
     def load_validation_config(self, config: dict):
         """Load validation scoring config from database values."""
@@ -61,7 +56,6 @@ class LLMService:
         self.route_loss_threshold = config.get('route_loss_threshold', -2)
         self.missing_field_default_score = config.get('missing_field_default_score', 50)
         self.api_key_min_length = config.get('api_key_min_length', 20)
-        self.demo_intent_confidence = config.get('demo_intent_confidence', 85)
 
     def _init_clients(self):
         """Initialize LLM clients based on available API keys."""
@@ -246,11 +240,6 @@ class LLMService:
         Returns:
             Parsed intent as dictionary
         """
-        # Demo mode: return realistic mock intent
-        if self.demo_mode:
-            logger.info("Demo mode: returning mock intent")
-            return self._generate_demo_intent(transcript, use_case=use_case)
-
         prompt = intent_prompt.replace("{{input_text}}", transcript)
 
         system_prompt = """You are a network operations intent parser.
@@ -326,40 +315,6 @@ class LLMService:
 
         return params
 
-    def _generate_demo_intent(self, transcript: str, use_case=None) -> Dict[str, Any]:
-        """Generate realistic demo intent based on transcript and use case."""
-        target_devices = self._extract_target_devices(transcript)
-        params = self._extract_params(transcript)
-
-        # Determine action from use_case allowed_actions or fall back
-        if use_case and getattr(use_case, 'allowed_actions', None) and len(use_case.allowed_actions) > 0:
-            allowed = use_case.allowed_actions
-            # Pick best matching action: prefer one whose keywords match the transcript
-            transcript_lower = transcript.lower()
-            action = allowed[0]  # default to first
-            for a in allowed:
-                # If the action name contains a word found in transcript, prefer it
-                action_words = a.lower().replace("_", " ").split()
-                if any(w in transcript_lower for w in action_words if len(w) > 3):
-                    action = a
-                    break
-        elif use_case:
-            # Fallback: use use_case.name as action (contains trigger keywords)
-            action = use_case.name
-        else:
-            action = "generic_config_change"
-
-        display_name = use_case.display_name if use_case else "generic"
-        target_desc = ", ".join(target_devices) if target_devices != ["all"] else "all routers"
-
-        return {
-            "action": action,
-            "target_devices": target_devices,
-            "parameters": params,
-            "confidence": self.demo_intent_confidence,
-            "reasoning": f"Intent for {display_name} on {target_desc}",
-        }
-
     async def generate_advice(
         self,
         intent: Dict[str, Any],
@@ -377,11 +332,6 @@ class LLMService:
         Returns:
             Advice including risk assessment, recommendations, and approval suggestion
         """
-        # Demo mode: return realistic mock advice
-        if self.demo_mode:
-            logger.info("Demo mode: returning mock advice")
-            return self._generate_demo_advice(intent, config, use_case=use_case)
-
         prompt = f"""
         Review the following network configuration change before deployment:
 
@@ -417,70 +367,6 @@ class LLMService:
             if json_match:
                 return json.loads(json_match.group())
             raise ValueError(f"Failed to parse JSON from response: {response}")
-
-    def _generate_demo_advice(self, intent: Dict[str, Any], config: Dict[str, Any], use_case=None) -> Dict[str, Any]:
-        """Generate advice derived from real per-device config data and DB-driven risk profile."""
-        risk_level = config.get("risk_level", "medium")
-        devices = intent.get("target_devices", ["Router-1"])
-        per_device = config.get("per_device_configs", {})
-
-        device_count = len(per_device) if per_device else len(devices)
-
-        # Get risk profile, pre/post checks from use case DB fields
-        db_risk_profile = getattr(use_case, 'risk_profile', None) or {
-            "risk_factors": ["Configuration change"],
-            "mitigation_steps": ["Review carefully before approval"],
-            "affected_services": ["Network services"],
-        }
-        db_pre_checks = getattr(use_case, 'pre_checks', None) or ["Validate configuration syntax"]
-        db_post_checks = getattr(use_case, 'post_checks', None) or ["Verify device reachability"]
-
-        # Start with DB-defined risk factors
-        risk_factors = list(db_risk_profile.get("risk_factors", []))
-        mitigation_steps = list(db_risk_profile.get("mitigation_steps", []))
-
-        if device_count > 2:
-            risk_factors.append(f"High impact: {device_count} devices affected simultaneously")
-
-        # Merge real per-device data into risk factors
-        if per_device:
-            for device_label, cfg in per_device.items():
-                cmd_count = len(cfg.get("commands", []))
-                has_rollback = len(cfg.get("rollback_commands", [])) > 0
-                warnings = cfg.get("warnings", [])
-                if cmd_count > 0:
-                    risk_factors.append(f"{device_label}: {cmd_count} commands to apply (rollback {'ready' if has_rollback else 'NOT available'})")
-                for w in warnings:
-                    if "already in area" not in w and "Generated password" not in w:
-                        risk_factors.append(f"{device_label}: {w}")
-
-        # Determine risk level from device count
-        if device_count > 2:
-            computed_risk = "HIGH"
-        elif device_count > 1:
-            computed_risk = "MEDIUM"
-        else:
-            computed_risk = risk_level.upper() if isinstance(risk_level, str) else "MEDIUM"
-
-        # Check all devices have rollback
-        all_rollback = all(
-            len(cfg.get("rollback_commands", [])) > 0
-            for cfg in per_device.values()
-        ) if per_device else bool(config.get("rollback_commands"))
-
-        return {
-            "risk_level": computed_risk,
-            "risk_factors": risk_factors,
-            "mitigation_steps": mitigation_steps,
-            "impact_assessment": config.get("estimated_impact", "Expected brief service impact during change application"),
-            "rollback_ready": all_rollback,
-            "recommendation": "APPROVE",
-            "recommendation_reason": f"Configuration built from live running configs. {device_count} device(s) targeted with {'per-device' if per_device else 'shared'} rollback commands.",
-            "pre_checks": db_pre_checks,
-            "post_checks": db_post_checks,
-            "estimated_duration": "30-60 seconds for configuration application, 15-45 seconds for convergence",
-            "affected_services": db_risk_profile.get("affected_services", ["Network services"]),
-        }
 
     async def generate_config(
         self,
@@ -547,11 +433,6 @@ class LLMService:
         Returns:
             Analysis results as dictionary
         """
-        # Demo mode: return realistic mock analysis
-        if self.demo_mode:
-            logger.info("Demo mode: returning mock analysis")
-            return self._generate_demo_analysis(config, splunk_results)
-
         prompt = analysis_prompt.replace("{{config}}", json.dumps(config, indent=2))
         prompt = prompt.replace("{{splunk_results}}", json.dumps(splunk_results, indent=2))
         prompt = prompt.replace("{{time_window}}", time_window)
@@ -576,30 +457,6 @@ class LLMService:
                 return json.loads(json_match.group())
             raise ValueError(f"Failed to parse JSON from response: {response}")
 
-    def _generate_demo_analysis(self, config: Dict[str, Any], splunk_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate analysis results. No longer returns fake metrics."""
-        explanation = config.get("explanation", "Configuration change")
-
-        return {
-            "status": "healthy",
-            "overall_score": 95,
-            "summary": f"Configuration change applied. {explanation}",
-            "validation_status": "PASSED",
-            "findings": [
-                {
-                    "category": "Deployment Status",
-                    "status": "ok",
-                    "message": "Configuration commands applied to target device(s)",
-                    "severity": "info"
-                },
-            ],
-            "metrics": {},
-            "deployment_verified": True,
-            "post_deployment_status": "Configuration applied",
-            "recommendation": "Verify via monitoring stage",
-            "recommendation_reason": "Analysis based on deployment result only. Real metrics come from monitoring diff.",
-        }
-
     async def validate_deployment(
         self,
         config: Dict[str, Any],
@@ -623,10 +480,8 @@ class LLMService:
         Returns:
             Validation results as dictionary
         """
-        # Demo mode: return realistic mock validation
-        if self.demo_mode:
-            logger.info("Demo mode: returning mock validation")
-            return self._generate_demo_validation(config, splunk_results, monitoring_diff)
+        # Compute diff metrics and include as structured context for the LLM
+        diff_metrics = self._compute_diff_metrics(monitoring_diff)
 
         prompt = validation_prompt.replace("{{config}}", json.dumps(config, indent=2))
         prompt = prompt.replace("{{deployment_result}}", json.dumps(deployment_result, indent=2))
@@ -634,6 +489,11 @@ class LLMService:
         prompt = prompt.replace("{{time_window}}", time_window)
         if monitoring_diff:
             prompt = prompt.replace("{{monitoring_diff}}", json.dumps(monitoring_diff, indent=2))
+
+        # Append computed diff metrics summary so LLM has structured context
+        prompt += f"\n\nComputed Diff Metrics: {diff_metrics['summary']}"
+        if diff_metrics.get("degraded"):
+            prompt += "\nWARNING: Network metrics indicate degradation. Strongly consider recommending rollback."
 
         system_prompt = """You are a senior network engineer validating deployment results.
 
@@ -778,6 +638,36 @@ Return ONLY the JSON object, no additional text."""
 
         return validation_dict
 
+    def _compute_diff_metrics(self, monitoring_diff: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Compute diff-based validation metrics from monitoring baseline/post-change data.
+
+        Returns a dict with ospf_change, interface_change, route_change,
+        and a human-readable summary string for LLM context.
+        """
+        if not monitoring_diff:
+            return {"summary": "No monitoring diff available"}
+
+        ospf_change = monitoring_diff.get("ospf_neighbors", {}).get("change", 0)
+        interface_change = monitoring_diff.get("interfaces_up", {}).get("change", 0)
+        route_change = monitoring_diff.get("routes", {}).get("change", 0)
+
+        summary_parts = [
+            f"OSPF neighbors change: {ospf_change:+d}",
+            f"Interfaces up change: {interface_change:+d}",
+            f"OSPF routes change: {route_change:+d}",
+        ]
+
+        degraded = ospf_change < 0 or interface_change < 0 or route_change < self.route_loss_threshold
+
+        return {
+            "ospf_change": ospf_change,
+            "interface_change": interface_change,
+            "route_change": route_change,
+            "degraded": degraded,
+            "summary": "; ".join(summary_parts),
+        }
+
     def _fallback_validation(self, monitoring_diff: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Generate fallback validation when LLM response fails to parse."""
         deployment_healthy = True
@@ -799,134 +689,6 @@ Return ONLY the JSON object, no additional text."""
             ],
             'summary': 'Automated validation due to LLM error',
             'recommendation': 'Rollback recommended' if not deployment_healthy else 'Deployment validated'
-        }
-
-    def _generate_demo_validation(
-        self,
-        config: Dict[str, Any],
-        splunk_results: Dict[str, Any],
-        monitoring_diff: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Generate realistic demo validation results including diff analysis and rollback recommendations."""
-        explanation = config.get("explanation", "Configuration change")
-
-        # Initialize rollback variables
-        rollback_recommended = False
-        rollback_reason = None
-        validation_status = "PASSED"
-
-        # Analyze diff to determine status and rollback need
-        diff_findings = []
-        if monitoring_diff:
-            ospf_change = monitoring_diff.get("ospf_neighbors", {}).get("change", 0)
-            interface_change = monitoring_diff.get("interfaces_up", {}).get("change", 0)
-            route_change = monitoring_diff.get("routes", {}).get("change", 0)
-
-            # CRITICAL: Rollback criteria - detect network degradation
-            if ospf_change < 0 or interface_change < 0:
-                rollback_recommended = True
-                validation_status = "FAILED"
-                rollback_reason = (
-                    f"Network degradation detected: "
-                    f"OSPF neighbors {ospf_change:+d}, interfaces {interface_change:+d}. "
-                    f"This indicates loss of connectivity or routing instability."
-                )
-            elif route_change < self.route_loss_threshold:  # Lost more than threshold routes
-                rollback_recommended = True
-                validation_status = "FAILED"
-                rollback_reason = f"Significant route loss detected: {route_change:+d} routes. This may indicate routing instability."
-            elif ospf_change < 0 or interface_change < 0 or route_change < 0:
-                validation_status = "WARNING"
-
-            # Build detailed findings for each metric
-            if ospf_change >= 0:
-                diff_findings.append({
-                    "category": "OSPF Neighbors",
-                    "status": "ok",
-                    "message": f"OSPF neighbor count stable ({ospf_change:+d} change)",
-                    "severity": "info"
-                })
-            else:
-                diff_findings.append({
-                    "category": "OSPF Neighbors",
-                    "status": "error" if rollback_recommended else "warning",
-                    "message": f"CRITICAL: OSPF neighbor count decreased ({ospf_change:+d})",
-                    "severity": "critical" if rollback_recommended else "warning"
-                })
-
-            if interface_change >= 0:
-                diff_findings.append({
-                    "category": "Interface Status",
-                    "status": "ok",
-                    "message": f"All interfaces stable ({interface_change:+d} change)",
-                    "severity": "info"
-                })
-            else:
-                diff_findings.append({
-                    "category": "Interface Status",
-                    "status": "error" if rollback_recommended else "warning",
-                    "message": f"CRITICAL: Some interfaces went down ({interface_change:+d})",
-                    "severity": "critical" if rollback_recommended else "warning"
-                })
-
-            if route_change >= 0:
-                diff_findings.append({
-                    "category": "OSPF Routes",
-                    "status": "ok",
-                    "message": f"Route count stable ({route_change:+d} change)",
-                    "severity": "info"
-                })
-            else:
-                diff_findings.append({
-                    "category": "OSPF Routes",
-                    "status": "error" if rollback_recommended else "warning",
-                    "message": f"Routes lost ({route_change:+d})",
-                    "severity": "critical" if route_change < self.route_loss_threshold else "warning"
-                })
-
-        base_findings = []
-        if not diff_findings:
-            base_findings.append({
-                "category": "Deployment Status",
-                "status": "ok",
-                "message": "Configuration commands applied to target device(s)",
-                "severity": "info"
-            })
-
-        all_findings = diff_findings + base_findings
-
-        # Determine overall score based on validation status
-        if validation_status == "FAILED":
-            overall_score = self.score_failed
-        elif validation_status == "WARNING":
-            overall_score = self.score_warning
-        else:
-            overall_score = self.score_success
-
-        # Build recommendation message
-        if rollback_recommended:
-            recommendation = f"ROLLBACK REQUIRED: {rollback_reason}"
-        elif validation_status == "WARNING":
-            recommendation = "Configuration applied with warnings. Monitor network closely for the next 10 minutes."
-        else:
-            recommendation = "Deployment successful. All metrics within expected parameters."
-
-        return {
-            "status": "critical" if rollback_recommended else ("degraded" if validation_status == "WARNING" else "healthy"),
-            "overall_score": overall_score,
-            "summary": f"Configuration change applied. {explanation}",
-            "validation_status": validation_status,
-            "findings": all_findings,
-            "metrics": {
-                "neighbor_count": monitoring_diff.get("ospf_neighbors", {}).get("after") if monitoring_diff else None,
-                "routes_in_area": monitoring_diff.get("routes", {}).get("after") if monitoring_diff else None,
-            },
-            "deployment_verified": not rollback_recommended,
-            "post_deployment_status": "CRITICAL - Rollback Required" if rollback_recommended else "Configuration applied and verified",
-            "recommendation": recommendation,
-            "recommendation_reason": rollback_reason if rollback_recommended else ("Some metrics changed during deployment" if validation_status == "WARNING" else "All health checks passed"),
-            "rollback_recommended": rollback_recommended,
-            "rollback_reason": rollback_reason,
         }
 
     async def generate_notification(

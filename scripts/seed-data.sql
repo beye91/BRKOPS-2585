@@ -39,7 +39,6 @@ INSERT INTO config_variables (key, value, description, category, is_secret) VALU
 ('pipeline.convergence_wait_seconds', '45', 'Seconds to wait for network convergence after config push', 'pipeline', false),
 ('pipeline.mcp_timeout_seconds', '60', 'Timeout for MCP server requests', 'pipeline', false),
 ('pipeline.max_retries', '3', 'Maximum retry attempts for failed stages', 'pipeline', false),
-('pipeline.demo_mode', 'true', 'Enable step-by-step advancement in demo', 'pipeline', false),
 ('pipeline.auto_advance', 'false', 'Auto-advance through stages without pausing', 'pipeline', false)
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
@@ -115,8 +114,7 @@ ON CONFLICT (key) DO NOTHING;
 -- Extended Pipeline Configuration
 INSERT INTO config_variables (key, value, description, category, is_secret) VALUES
 ('pipeline.config_truncation_limit', '12000', 'Max total chars for lab context configs', 'pipeline', false),
-('pipeline.monitoring_interval_max', '5', 'Max seconds per monitoring progress interval', 'pipeline', false),
-('pipeline.demo_stage_pause_seconds', '1', 'Seconds to pause between demo stages', 'pipeline', false)
+('pipeline.monitoring_interval_max', '5', 'Max seconds per monitoring progress interval', 'pipeline', false)
 ON CONFLICT (key) DO NOTHING;
 
 -- Operational Configuration

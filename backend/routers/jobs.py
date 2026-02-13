@@ -168,12 +168,9 @@ async def retry_job(
                 password=settings.redis_password or None,
             )
         )
-        from services.config_service import ConfigService
-        demo_mode = await ConfigService.get_config(db, "pipeline.demo_mode", True)
         await redis_pool.enqueue_job(
             "process_pipeline_job",
             job_id,
-            demo_mode,
         )
         await redis_pool.close()
 

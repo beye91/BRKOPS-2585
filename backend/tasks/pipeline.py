@@ -289,12 +289,12 @@ def count_interfaces_up(interfaces: List[Dict[str, Any]]) -> int:
     return sum(1 for i in interfaces if i.get("status", "").lower() == "up")
 
 
-async def continue_pipeline_after_approval(ctx: dict, job_id: str, demo_mode: bool = True):
+async def continue_pipeline_after_approval(ctx: dict, job_id: str):
     """
     Continue pipeline processing after human approval.
     Runs stages 6-10: CML_DEPLOYMENT, MONITORING, SPLUNK_ANALYSIS, AI_VALIDATION, NOTIFICATIONS
     """
-    logger.info("Continuing pipeline after approval", job_id=job_id, demo_mode=demo_mode)
+    logger.info("Continuing pipeline after approval", job_id=job_id)
 
     async with async_session() as db:
         # Get job
@@ -361,7 +361,7 @@ async def continue_pipeline_after_approval(ctx: dict, job_id: str, demo_mode: bo
 
                 # Process stage
                 try:
-                    stage_result = await processor(ctx, job, use_case, db, demo_mode=demo_mode)
+                    stage_result = await processor(ctx, job, use_case, db)
 
                     # Update stage data
                     job.stages_data[stage.value] = {
@@ -404,24 +404,6 @@ async def continue_pipeline_after_approval(ctx: dict, job_id: str, demo_mode: bo
                     })
                     return
 
-                # Demo mode: pause after each stage
-                if demo_mode:
-                    job.status = JobStatus.PAUSED
-                    await db.commit()
-
-                    await manager.broadcast({
-                        "type": "operation.paused",
-                        "job_id": job_id,
-                        "stage": stage.value,
-                        "message": "Waiting for manual advancement",
-                    })
-
-                    from services.config_service import ConfigService
-                    demo_pause = await ConfigService.get_config(db, "pipeline.demo_stage_pause_seconds", 1)
-                    await asyncio.sleep(demo_pause)
-                    job.status = JobStatus.RUNNING
-                    await db.commit()
-
             # Job completed successfully
             job.status = JobStatus.COMPLETED
             job.completed_at = datetime.utcnow()
@@ -445,13 +427,13 @@ async def continue_pipeline_after_approval(ctx: dict, job_id: str, demo_mode: bo
             })
 
 
-async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
+async def process_pipeline_job(ctx: dict, job_id: str):
     """
     Main pipeline job processor.
     Orchestrates all 11 stages of the pipeline.
     Pauses at HUMAN_DECISION stage for approval before deployment.
     """
-    logger.info("Processing pipeline job", job_id=job_id, demo_mode=demo_mode)
+    logger.info("Processing pipeline job", job_id=job_id)
 
     async with async_session() as db:
         # Get job
@@ -538,7 +520,7 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
 
                 # Process stage
                 try:
-                    stage_result = await processor(ctx, job, use_case, db, demo_mode=demo_mode)
+                    stage_result = await processor(ctx, job, use_case, db)
 
                     # Check if stage result indicates failure
                     stage_failed = False
@@ -612,26 +594,6 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
                     logger.info("Pipeline paused for human approval", job_id=job_id)
                     return
 
-                # Demo mode: pause after each stage (except human_decision which pauses above)
-                if demo_mode:
-                    job.status = JobStatus.PAUSED
-                    await db.commit()
-
-                    await manager.broadcast({
-                        "type": "operation.paused",
-                        "job_id": job_id,
-                        "stage": stage.value,
-                        "message": "Waiting for manual advancement",
-                    })
-
-                    # Wait for resume (in production, this would be handled differently)
-                    # For now, we continue after a configurable delay
-                    from services.config_service import ConfigService
-                    demo_pause = await ConfigService.get_config(db, "pipeline.demo_stage_pause_seconds", 1)
-                    await asyncio.sleep(demo_pause)
-                    job.status = JobStatus.RUNNING
-                    await db.commit()
-
             # Job completed successfully (after all stages including post-approval)
             job.status = JobStatus.COMPLETED
             job.completed_at = datetime.utcnow()
@@ -655,7 +617,7 @@ async def process_pipeline_job(ctx: dict, job_id: str, demo_mode: bool = True):
             })
 
 
-async def process_voice_input(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_voice_input(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """Process voice input stage."""
     logger.info("Processing voice input", job_id=str(job.id))
 
@@ -669,7 +631,7 @@ async def process_voice_input(ctx: dict, job: PipelineJob, use_case: UseCase, db
     }
 
 
-async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """Validate and enrich pre-parsed intent from operations router."""
     logger.info("Validating intent", job_id=str(job.id))
 
@@ -682,7 +644,6 @@ async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase,
         logger.warning("No pre-parsed intent found, parsing now", job_id=str(job.id))
 
         llm_service = LLMService(
-            demo_mode=False,
             provider=getattr(use_case, 'llm_provider', None) if use_case else None,
             model=getattr(use_case, 'llm_model', None) if use_case else None,
         )
@@ -826,7 +787,7 @@ async def process_intent_parsing(ctx: dict, job: PipelineJob, use_case: UseCase,
     return intent
 
 
-async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """Generate configuration from intent using real running configs from CML devices."""
     logger.info("Generating config", job_id=str(job.id))
 
@@ -924,7 +885,6 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
             if change is None:
                 # No registered builder -> LLM fallback with running config context
                 llm_service = LLMService(
-                    demo_mode=False,  # Always use real LLM clients (demo_mode is for pipeline pausing, not LLM mocking)
                     provider=getattr(use_case, 'llm_provider', None) if use_case else None,
                     model=getattr(use_case, 'llm_model', None) if use_case else None,
                 )
@@ -961,7 +921,6 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
     if not per_device_configs:
         logger.warning("No running configs, falling back to LLM config generation", job_id=str(job.id))
         llm_service = LLMService(
-            demo_mode=False,  # Always use real LLM clients (demo_mode is for pipeline pausing, not LLM mocking)
             provider=getattr(use_case, 'llm_provider', None) if use_case else None,
             model=getattr(use_case, 'llm_model', None) if use_case else None,
         )
@@ -1014,12 +973,11 @@ async def process_config_generation(ctx: dict, job: PipelineJob, use_case: UseCa
     return config_result
 
 
-async def process_ai_advice(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_ai_advice(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """Generate AI advice and risk assessment before human decision."""
     logger.info("Generating AI advice", job_id=str(job.id))
 
     llm_service = LLMService(
-        demo_mode=False,  # Always use real LLM clients (demo_mode is for pipeline pausing, not LLM mocking)
         provider=getattr(use_case, 'llm_provider', None) if use_case else None,
         model=getattr(use_case, 'llm_model', None) if use_case else None,
     )
@@ -1040,7 +998,7 @@ async def process_ai_advice(ctx: dict, job: PipelineJob, use_case: UseCase, db, 
     return advice
 
 
-async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """Deploy configuration to CML. Deploys to ALL target devices."""
     logger.info("Deploying to CML", job_id=str(job.id))
 
@@ -1168,7 +1126,7 @@ async def process_cml_deployment(ctx: dict, job: PipelineJob, use_case: UseCase,
         }
 
 
-async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_monitoring(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """
     Monitor network convergence after deployment.
 
@@ -1430,7 +1388,7 @@ def normalize_splunk_timestamp(timestamp_value: Any) -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """Query Splunk for post-change logs."""
     logger.info("Querying Splunk", job_id=str(job.id))
 
@@ -1495,7 +1453,7 @@ async def process_splunk_analysis(ctx: dict, job: PipelineJob, use_case: UseCase
         }
 
 
-async def process_ai_validation(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_ai_validation(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """Validate deployment results with AI (post-deployment analysis)."""
     logger.info("AI validation", job_id=str(job.id))
 
@@ -1548,7 +1506,6 @@ async def process_ai_validation(ctx: dict, job: PipelineJob, use_case: UseCase, 
         }
 
     llm_service = LLMService(
-        demo_mode=False,  # Always use real LLM clients (demo_mode is for pipeline pausing, not LLM mocking)
         provider=getattr(use_case, 'llm_provider', None) if use_case else None,
         model=getattr(use_case, 'llm_model', None) if use_case else None,
     )
@@ -1609,7 +1566,7 @@ async def process_ai_validation(ctx: dict, job: PipelineJob, use_case: UseCase, 
     return validation
 
 
-async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """Send notifications based on validation results."""
     logger.info("Sending notifications", job_id=str(job.id))
 
@@ -1738,7 +1695,7 @@ async def process_notifications(ctx: dict, job: PipelineJob, use_case: UseCase, 
     }
 
 
-async def process_human_decision(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_human_decision(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """Prepare for human decision BEFORE deployment."""
     logger.info("Awaiting human decision before deployment", job_id=str(job.id))
 
@@ -1758,7 +1715,7 @@ async def process_human_decision(ctx: dict, job: PipelineJob, use_case: UseCase,
     return summary
 
 
-async def process_baseline_collection(ctx: dict, job: PipelineJob, use_case: UseCase, db, demo_mode: bool = False) -> Dict[str, Any]:
+async def process_baseline_collection(ctx: dict, job: PipelineJob, use_case: UseCase, db, ) -> Dict[str, Any]:
     """
     Collect baseline network state BEFORE deployment.
 

@@ -1726,7 +1726,6 @@ function PipelineTab({ showToast }: { showToast: (msg: string, type: 'success' |
     convergence_wait_seconds: '45',
     mcp_timeout_seconds: '60',
     max_retries: '3',
-    demo_mode: true,
     auto_advance: false,
   });
   const [hasChanges, setHasChanges] = useState(false);
@@ -1837,19 +1836,6 @@ function PipelineTab({ showToast }: { showToast: (msg: string, type: 'success' |
               onChange={(e) => handleChange('max_retries', e.target.value)}
               className="w-full px-4 py-2 bg-background border border-border rounded-lg"
             />
-          </div>
-
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="demo-mode"
-              checked={formValues.demo_mode}
-              onChange={(e) => handleChange('demo_mode', e.target.checked)}
-              className="rounded"
-            />
-            <label htmlFor="demo-mode" className="text-sm">
-              Enable Demo Mode (step-by-step advancement)
-            </label>
           </div>
 
           <div className="flex items-center gap-3">

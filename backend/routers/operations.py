@@ -74,7 +74,6 @@ async def start_operation(
 
     # Initialize LLM-based matcher with database-provided API keys
     llm_service = LLMService(
-        demo_mode=False,
         openai_api_key=openai_key,
         anthropic_api_key=anthropic_key
     )
@@ -203,7 +202,6 @@ async def start_operation(
         await redis_pool.enqueue_job(
             "process_pipeline_job",
             str(job.id),
-            operation.demo_mode,
         )
         await redis_pool.close()
         logger.info("Job enqueued for processing", job_id=str(job.id))
@@ -381,7 +379,6 @@ async def approve_operation(
             await redis_pool.enqueue_job(
                 "continue_pipeline_after_approval",
                 str(operation_id),
-                True,  # demo_mode
             )
             await redis_pool.close()
             logger.info("Pipeline continuation enqueued", job_id=str(operation_id))
@@ -461,9 +458,7 @@ async def advance_operation(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Manually advance operation to next stage (demo mode).
-
-    Used when demo_mode is enabled to step through the pipeline manually.
+    Manually advance a paused operation to the next stage.
     """
     result = await db.execute(select(PipelineJob).where(PipelineJob.id == operation_id))
     job = result.scalar_one_or_none()
@@ -492,7 +487,6 @@ async def advance_operation(
         await redis_pool.enqueue_job(
             "process_pipeline_job",
             str(job.id),
-            True,  # demo_mode
         )
         await redis_pool.close()
     except Exception as e:
